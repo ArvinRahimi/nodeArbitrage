@@ -1,0 +1,57 @@
+# Node.js dependencies
+node_modules/
+
+# Logs
+logs/
+coverage/
+
+# Project configuration files
+.vscode/
+idea/
+
+# Editor configuration files
+.editorconfig
+.eslintignore
+.eslintrc*
+.jshintignore
+.jshintrc
+.stylelintignore
+.stylelintrc*
+
+# System files
+.DS_Store
+Thumbs.db
+
+# Environment files
+.env
+
+# Compiled code
+build/
+dist/
+temp/
+
+# Test coverage files
+coverage/
+
+# Runtime data
+runtime/
+pid
+
+# IDE settings
+.idea/
+.settings/
+.vscode/
+machines.json
+
+# Testing files
+test-report.xml
+junit.xml
+
+# Package lock files
+package-lock.json
+
+# Intellij files
+.iml
+idea.module
+project.iml
+workspace.xml

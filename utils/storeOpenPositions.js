@@ -1,4 +1,6 @@
-export function storeOpenPosition({
+import { storePosition } from './database.js'; // ensure correct path
+
+export async function storeOpenPosition({
   symbol,
   buyExchange,
   sellExchange,
@@ -6,14 +8,13 @@ export function storeOpenPosition({
   entryBuyPrice,
   entrySellPrice,
 }) {
-  openPositions.push({
+  await storePosition({
     symbol,
     buyExchange,
     sellExchange,
     amount,
     entryBuyPrice,
     entrySellPrice,
-    timestamp: Date.now(),
   });
-  console.log('Open position stored.');
+  console.log('Open position stored in DB.');
 }

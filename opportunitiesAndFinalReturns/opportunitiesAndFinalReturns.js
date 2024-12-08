@@ -99,7 +99,7 @@ export async function calculateFinalReturns(
   USDTPrice,
   returnTypeOnOpen = null, // enum: [null, 'slip', 'spread']]
 ) {
-  const { fees, leverage, minVolumeUSD, slippage } = CONFIG;
+  const { leverage, minVolumeUSD } = CONFIG;
 
   const tradeVolumeUSDT = minVolumeUSD * leverage;
 
@@ -151,6 +151,8 @@ export async function calculateFinalReturns(
     opportunities,
     vwapResultsByExchange,
     returnTypeOnOpen,
+    USDTPrice,
+    tradeVolumeUSDT,
   );
 
   return finalReturns;
@@ -160,8 +162,10 @@ export function calculateFinalReturnsFromOpportunities(
   opportunities,
   vwapResultsByExchange,
   returnTypeOnOpen,
+  USDTPrice,
+  tradeVolumeUSDT,
 ) {
-  const fees = CONFIG?.fees;
+  const { fees, slippage } = CONFIG;
   const finalReturns = [];
   for (const opportunity of opportunities) {
     const { symbol, buyExchange, sellExchange } = opportunity;
@@ -182,14 +186,17 @@ export function calculateFinalReturnsFromOpportunities(
 
     const profit = netSellPrice - netBuyPrice;
 
-    const returnPercentage = (profit / netSellPrice) * 100;
+    const totalEntryCost = netBuyPrice + netSellPrice;
+    const returnPercentage = (profit / totalEntryCost) * 100;
 
     const netSellPriceWithSlippage = netSellPrice * (1 - slippage);
     const netBuyPriceWithSlippage = netBuyPrice * (1 + slippage);
     const profitWithSlippage =
       netSellPriceWithSlippage - netBuyPriceWithSlippage;
+    const totalEntryCostWithSlippage =
+      netSellPriceWithSlippage + netBuyPriceWithSlippage;
     const returnPercentageWithSlippage =
-      (profitWithSlippage / netSellPriceWithSlippage) * 100;
+      (profitWithSlippage / totalEntryCostWithSlippage) * 100;
 
     const netSellPriceWithSlippageAndSpread =
       netSellPriceWithSlippage - spreadBuyExchange;
@@ -197,8 +204,10 @@ export function calculateFinalReturnsFromOpportunities(
       netBuyPriceWithSlippage + spreadSellExchange;
     const profitWithSlippageAndSpread =
       netSellPriceWithSlippageAndSpread - netBuyPriceWithSlippageAndSpread;
+    const totalEntryCostWithSlippageAndSpread =
+      netSellPriceWithSlippageAndSpread + netBuyPriceWithSlippageAndSpread;
     const returnPercentageWithSlippageAndSpread =
-      (profitWithSlippageAndSpread / netSellPriceWithSlippageAndSpread) * 100;
+      (profitWithSlippageAndSpread / totalEntryCostWithSlippageAndSpread) * 100;
 
     let selectedBuyPrice;
     let selectedSellPrice;
@@ -206,14 +215,17 @@ export function calculateFinalReturnsFromOpportunities(
       case 'slip':
         selectedBuyPrice = netBuyPriceWithSlippage;
         selectedSellPrice = netSellPriceWithSlippage;
+        break;
 
       case 'spread':
         selectedBuyPrice = netBuyPriceWithSlippageAndSpread;
         selectedSellPrice = netSellPriceWithSlippageAndSpread;
+        break;
 
       default:
         selectedBuyPrice = netBuyPrice;
         selectedSellPrice = netSellPrice;
+        break;
     }
 
     const selectedReturnPercentage =
@@ -240,4 +252,5 @@ export function calculateFinalReturnsFromOpportunities(
       USDTPrice,
     });
   }
+  return finalReturns;
 }

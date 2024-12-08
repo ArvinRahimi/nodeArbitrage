@@ -12,7 +12,6 @@ Directory Structure:
 │   └── opportunitiesAndFinalReturns.js
 ├── orderCreation/
 │   ├── orderCreation.js
-│   ├── orderCreationHelpers.js
 │   └── orderExchangeCreation.js
 ├── transforms/
 │   ├── originalizations.js
@@ -20,13 +19,20 @@ Directory Structure:
 ├── utils/
 │   ├── addTMNSymbols.js
 │   ├── calculateTMNPrice.js
+│   ├── database.js
 │   ├── splitSymbols.js
 │   └── storeOpenPositions.js
 ├── VWAP/
 │   └── VWAP.js
+├── .gitignore
+├── .prettierrc
 ├── config.js
 ├── dump.py
-└── index.js
+├── exclude.txt
+├── index.js
+├── open_positions.db
+├── output.txt
+└── package.json
 
 File Contents:
 --------------
@@ -49,12 +55,15 @@ import { createOrder } from './orderCreation/orderCreation.js';
 import { monitorOpenPositions } from './monitoring/monitoring.js';
 
 dotenv.config();
+
 const {
   exchangesToUse,
   exchangeParams,
   customExchanges,
   minMarginPercent,
-  returnType,
+  returnTypeOnOpen,
+  orderTypeOnOpen,
+  refreshIntervalMs,
 } = CONFIG;
 // Initialize exchanges
 const exchanges = {};
@@ -74,8 +83,6 @@ for (const id of exchangesToUse) {
 }
 
 // Main Execution Function
-let openPositions = [];
-
 async function main() {
   while (true) {
     try {
@@ -101,28 +108,24 @@ async function main() {
         opportunities,
         exchanges,
         USDTPrice,
-        returnType,
+        returnTypeOnOpen,
       );
 
       finalReturns = finalReturns
         .filter(
-          finalReturn =>
-            finalReturn.selectedReturnPercentage > minMarginPercent /* &&
-            customExchanges.includes(finalReturn.buyExchange) &&
-            !customExchanges.includes(finalReturn.sellExchange), */,
+          fr =>
+            fr.selectedReturnPercentage > minMarginPercent &&
+            fr.selectedReturnPercentage < 4,
         )
         .sort(
           (a, b) => b.selectedReturnPercentage - a.selectedReturnPercentage,
         );
 
       if (finalReturns?.length) {
-        for (const finalReturn of finalReturns) {
-          let order = finalReturn;
-          if (order.selectedReturnPercentage < 4) {
-            //await createOrder(exchanges, order);
-            break;
-          }
-        }
+        const order = finalReturns[0];
+
+        console.log('hi');
+        await createOrder(exchanges, order, orderTypeOnOpen);
       }
 
       if (!finalReturns?.length) {
@@ -144,19 +147,15 @@ async function main() {
       }
 
       // Monitor open positions
-      //await monitorOpenPositions();
+      await monitorOpenPositions(exchanges, USDTPrice);
       console.log('-----------------------------\n\n');
       if (finalReturns?.length) break;
       // Wait before next iteration
-      await new Promise(resolve =>
-        setTimeout(resolve, CONFIG.refreshIntervalMs),
-      );
+      await new Promise(resolve => setTimeout(resolve, refreshIntervalMs));
     } catch (error) {
       console.error('An error occurred:', error.message);
       // Wait before next iteration in case of error
-      await new Promise(resolve =>
-        setTimeout(resolve, CONFIG.refreshIntervalMs),
-      );
+      await new Promise(resolve => setTimeout(resolve, refreshIntervalMs));
     }
   }
 }
@@ -171,8 +170,12 @@ Content of ./config.js:
 // Configuration
 export const CONFIG = {
   minMarginPercent: 0.5, // Minimum margin percentage to consider
-  minVolumeUSD: 10, // Minimum trade volume in USD
-  returnType: 'spread', // enum: [null, 'slip', 'spread']]
+  minVolumeUSD: 10, // Minimum trade volume in USDT
+  returnTypeOnOpen: 'spread', // enum: [null, 'slip', 'spread']]
+  returnTypeOnClose: null, // enum: [null, 'slip']
+  closeMinMarginPercent: 0.4,
+  orderTypeOnOpen: 'limit',
+  orderTypeOnClose: 'limit',
   leverage: 1, // Leverage for positions
   refreshIntervalMs: 10000, // Interval to refresh data in milliseconds
   fees: {
@@ -243,144 +246,11 @@ export const CONFIG = {
       secret: process.env.WALLEX_SECRET_KEY,
     },
   },
+  databaseName: './open_positions.db',
+  orderTypeOnClose: 'limit', // 'market' or 'limit' - determines the order type used when closing positions
+  limitOrderPriceMargin: 0.001, // 0.1% - The margin to add/subtract from the top bid/ask when placing limit orders
 };
 
-
-File: ./dump.py
---------------------------------------------------
-Content of ./dump.py:
-import os
-import sys
-from typing import List, Set, Optional
-import fnmatch
-
-def parse_exclusion_file(file_path: str) -> Set[str]:
-    patterns = set()
-    if file_path and os.path.exists(file_path):
-        with open(file_path, 'r') as f:
-            for line in f:
-                line = line.strip()
-                if line and not line.startswith('#'):
-                    patterns.add(line)
-    return patterns
-
-def is_excluded(path: str, exclusion_patterns: Set[str]) -> bool:
-    for pattern in exclusion_patterns:
-        if pattern.startswith('/') and pattern.endswith('/'):
-            if path.startswith(pattern[1:]) or path == pattern[1:-1]:
-                return True
-        elif pattern.endswith('/'):
-            if path.startswith(pattern) or path == pattern[:-1]:
-                return True
-        elif pattern.startswith('/'):
-            if path == pattern[1:] or path.startswith(pattern[1:] + os.sep):
-                return True
-        else:
-            if fnmatch.fnmatch(path, pattern) or any(fnmatch.fnmatch(part, pattern) for part in path.split(os.sep)):
-                return True
-    return False
-
-def print_directory_structure(start_path: str, exclusion_patterns: Set[str]) -> str:
-    def _generate_tree(dir_path: str, prefix: str = '') -> List[str]:
-        entries = os.listdir(dir_path)
-        entries = sorted(entries, key=lambda x: (not os.path.isdir(os.path.join(dir_path, x)), x.lower()))
-        tree = []
-        for i, entry in enumerate(entries):
-            rel_path = os.path.relpath(os.path.join(dir_path, entry), start_path)
-            if is_excluded(rel_path, exclusion_patterns):
-                continue
-            
-            if i == len(entries) - 1:
-                connector = '└── '
-                new_prefix = prefix + '    '
-            else:
-                connector = '├── '
-                new_prefix = prefix + '│   '
-            
-            full_path = os.path.join(dir_path, entry)
-            if os.path.isdir(full_path):
-                tree.append(f"{prefix}{connector}{entry}/")
-                tree.extend(_generate_tree(full_path, new_prefix))
-            else:
-                tree.append(f"{prefix}{connector}{entry}")
-        return tree
-
-    tree = ['/ '] + _generate_tree(start_path)
-    return '\n'.join(tree)
-
-def scan_folder(start_path: str, file_types: Optional[List[str]], output_file: str, exclusion_patterns: Set[str]) -> None:
-    with open(output_file, 'w', encoding='utf-8') as out_file:
-        # Write the directory structure
-        out_file.write("Directory Structure:\n")
-        out_file.write("-------------------\n")
-        out_file.write(print_directory_structure(start_path, exclusion_patterns))
-        out_file.write("\n\n")
-        out_file.write("File Contents:\n")
-        out_file.write("--------------\n")
-
-        for root, dirs, files in os.walk(start_path):
-            rel_path = os.path.relpath(root, start_path)
-            
-            if is_excluded(rel_path, exclusion_patterns):
-                continue
-            
-            for file in files:
-                file_rel_path = os.path.join(rel_path, file)
-                if is_excluded(file_rel_path, exclusion_patterns):
-                    continue
-                if file_types is None or any(file.endswith(ext) for ext in file_types):
-                    file_path = os.path.join(root, file)
-                    
-                    print(f"Processing: {file_rel_path}")
-                    out_file.write(f"File: {file_rel_path}\n")
-                    out_file.write("-" * 50 + "\n")
-                    
-                    try:
-                        with open(file_path, 'r', encoding='utf-8') as in_file:
-                            content = in_file.read()
-                            out_file.write(f"Content of {file_rel_path}:\n")
-                            out_file.write(content)
-                    except Exception as e:
-                        print(f"Error reading file {file_rel_path}: {str(e)}. Skipping.")
-                        out_file.write(f"Error reading file: {str(e)}. Content skipped.\n")
-                    
-                    out_file.write("\n\n")
-
-def main(args: List[str]) -> None:
-    if len(args) < 3:
-        print("Usage: python script.py <start_path> <output_file> [exclusion_file] [file_extensions...]")
-        print("Both exclusion_file and file_extensions are optional.")
-        sys.exit(1)
-
-    start_path: str = args[1]
-    output_file: str = args[2]
-    exclusion_file: Optional[str] = None
-    file_types: Optional[List[str]] = None
-
-    if len(args) > 3:
-        if not args[3].startswith('.'):
-            exclusion_file = args[3]
-            file_types = args[4:] if len(args) > 4 else None
-        else:
-            file_types = args[3:]
-
-    exclusion_patterns = parse_exclusion_file(exclusion_file) if exclusion_file else set()
-    
-    if exclusion_file:
-        print(f"Using exclusion patterns from {exclusion_file}: {exclusion_patterns}")
-    else:
-        print("No exclusion file specified. Scanning all files.")
-
-    if file_types:
-        print(f"Scanning for file types: {file_types}")
-    else:
-        print("No file types specified. Scanning all files.")
-
-    scan_folder(start_path, file_types, output_file, exclusion_patterns)
-    print(f"Scan complete. Results written to {output_file}")
-
-if __name__ == "__main__":
-    main(sys.argv)
 
 File: opportunitiesAndFinalReturns/opportunitiesAndFinalReturns.js
 --------------------------------------------------
@@ -484,11 +354,11 @@ export async function calculateFinalReturns(
   opportunities,
   exchanges,
   USDTPrice,
-  returnType = 'low', // enum: [undefined, 'slip', 'spread']]
+  returnTypeOnOpen = null, // enum: [null, 'slip', 'spread']]
 ) {
   const { fees, leverage, minVolumeUSD, slippage } = CONFIG;
 
-  const tradeVolumeUSD = minVolumeUSD * leverage;
+  const tradeVolumeUSDT = minVolumeUSD * leverage;
 
   const symbolsAndSidesByExchange = {};
 
@@ -523,8 +393,8 @@ export async function calculateFinalReturns(
         const vwapResults = await getVWAPs(
           exchanges,
           exchangeId,
-          symbolsAndSides,
-          tradeVolumeUSD,
+          Object.keys(symbolsAndSides),
+          tradeVolumeUSDT,
           USDTPrice,
         );
         vwapResultsByExchange[exchangeId] = vwapResults;
@@ -534,8 +404,22 @@ export async function calculateFinalReturns(
   console.log('COMPLETE: Order books fetched\n');
   addTMNSymbols(vwapResultsByExchange, USDTPrice);
 
-  const finalReturns = [];
+  const finalReturns = calculateFinalReturnsFromOpportunities(
+    opportunities,
+    vwapResultsByExchange,
+    returnTypeOnOpen,
+  );
 
+  return finalReturns;
+}
+
+export function calculateFinalReturnsFromOpportunities(
+  opportunities,
+  vwapResultsByExchange,
+  returnTypeOnOpen,
+) {
+  const fees = CONFIG?.fees;
+  const finalReturns = [];
   for (const opportunity of opportunities) {
     const { symbol, buyExchange, sellExchange } = opportunity;
 
@@ -555,14 +439,17 @@ export async function calculateFinalReturns(
 
     const profit = netSellPrice - netBuyPrice;
 
-    const returnPercentage = (profit / netSellPrice) * 100;
+    const totalEntryCost = netBuyPrice + netSellPrice;
+    const returnPercentage = (profit / totalEntryCost) * 100;
 
     const netSellPriceWithSlippage = netSellPrice * (1 - slippage);
     const netBuyPriceWithSlippage = netBuyPrice * (1 + slippage);
     const profitWithSlippage =
       netSellPriceWithSlippage - netBuyPriceWithSlippage;
+    const totalEntryCostWithSlippage =
+      netSellPriceWithSlippage + netBuyPriceWithSlippage;
     const returnPercentageWithSlippage =
-      (profitWithSlippage / netSellPriceWithSlippage) * 100;
+      (profitWithSlippage / totalEntryCostWithSlippage) * 100;
 
     const netSellPriceWithSlippageAndSpread =
       netSellPriceWithSlippage - spreadBuyExchange;
@@ -570,23 +457,28 @@ export async function calculateFinalReturns(
       netBuyPriceWithSlippage + spreadSellExchange;
     const profitWithSlippageAndSpread =
       netSellPriceWithSlippageAndSpread - netBuyPriceWithSlippageAndSpread;
+    const totalEntryCostWithSlippageAndSpread =
+      netSellPriceWithSlippageAndSpread + netBuyPriceWithSlippageAndSpread;
     const returnPercentageWithSlippageAndSpread =
-      (profitWithSlippageAndSpread / netSellPriceWithSlippageAndSpread) * 100;
+      (profitWithSlippageAndSpread / totalEntryCostWithSlippageAndSpread) * 100;
 
     let selectedBuyPrice;
     let selectedSellPrice;
-    switch (returnType) {
+    switch (returnTypeOnOpen) {
       case 'slip':
         selectedBuyPrice = netBuyPriceWithSlippage;
         selectedSellPrice = netSellPriceWithSlippage;
+        break;
 
       case 'spread':
         selectedBuyPrice = netBuyPriceWithSlippageAndSpread;
         selectedSellPrice = netSellPriceWithSlippageAndSpread;
+        break;
 
       default:
         selectedBuyPrice = netBuyPrice;
         selectedSellPrice = netSellPrice;
+        break;
     }
 
     const selectedReturnPercentage =
@@ -609,153 +501,105 @@ export async function calculateFinalReturns(
       netBuyPriceWithSlippageAndSpread,
       netSellPriceWithSlippageAndSpread,
       returnPercentageWithSlippageAndSpread,
-      tradeVolumeUSD,
+      tradeVolumeUSDT,
       USDTPrice,
     });
   }
-
-  return finalReturns;
 }
 
 
 File: close/closePosition.js
 --------------------------------------------------
 Content of close/closePosition.js:
-//! It ,ust be read and reviewd based on create order completely
+import { createOrder } from '../orderCreation/orderCreation.js';
+import {
+  moveToClosedPositions,
+  updateOpenPosition,
+} from '../utils/database.js';
 
-// Close Open Positions
-export async function closePosition(position) {
-  const { symbol, buyExchange, sellExchange, amount } = position;
-
+export async function closePosition(
+  exchanges,
+  {
+    id,
+    symbol,
+    buyExchange,
+    sellExchange,
+    amount,
+    selectedBuyPrice,
+    selectedSellPrice,
+    tradeVolumeUSDT,
+    USDTPrice,
+  },
+  type,
+) {
   console.log(
-    `Closing position for ${symbol} on ${buyExchange} and ${sellExchange}`,
+    `Initiating position closure for ${symbol} on ${buyExchange}/${sellExchange}`,
   );
 
-  // Close Buy Position (Sell)
   try {
-    if (exchanges[buyExchange]) {
-      await exchanges[buyExchange].createMarketSellOrder(symbol, amount);
-    } else {
-      console.log(`Custom order closing needed for ${buyExchange}`);
-      // Implement custom order closing for Nobitex or Wallex
-    }
-  } catch (error) {
-    console.error(`Error closing position on ${buyExchange}:`, error.message);
-  }
-
-  // Close Sell Position (Buy)
-  try {
-    if (exchanges[sellExchange]) {
-      await exchanges[sellExchange].createMarketBuyOrder(symbol, amount);
-    } else {
-      console.log(`Custom order closing needed for ${sellExchange}`);
-      // Implement custom order closing for Nobitex or Wallex
-    }
-  } catch (error) {
-    console.error(`Error closing position on ${sellExchange}:`, error.message);
-  }
-
-  console.log(`Position for ${symbol} closed.`);
-}
-
-
-File: orderCreation/orderCreationHelpers.js
---------------------------------------------------
-Content of orderCreation/orderCreationHelpers.js:
-import readline from 'readline';
-
-// Function to retry order placement
-export async function retryOrderCreation(
-  exchanges,
-  exchangeId,
-  symbol,
-  side,
-  amount,
-  price,
-  maxRetries = 10,
-  interval = 500,
-) {
-  for (let i = 0; i < maxRetries; i++) {
-    try {
-      console.log(
-        `Attempt ${
-          i + 1
-        }/${maxRetries} to place ${side} order on ${exchangeId}`,
-      );
-      const order = await exchanges[exchangeId].createOrder(
+    await updateOpenPosition(id, { status: 'closing' });
+    //! check prices both selected and net
+    const closingOrderResult = await createOrder(
+      exchanges,
+      {
         symbol,
-        'market',
-        side,
+        buyExchange: sellExchange,
+        sellExchange: buyExchange,
+        selectedBuyPrice: selectedBuyPrice,
+        selectedSellPrice: selectedSellPrice,
+        tradeVolumeUSDT,
+        netBuyPrice,
+        netSellPrice,
+        USDTPrice,
         amount,
-        price,
-      );
-      console.log(`${side} order on ${exchangeId} successful.`);
-      return order; // Success
-    } catch (error) {
-      console.error(
-        `Failed to place ${side} order on ${exchangeId}: ${error.message}`,
-      );
-      if (i < maxRetries - 1) {
-        await new Promise(resolve => setTimeout(resolve, interval)); // Wait before retrying
-      }
-    }
-  }
-  return null; // Failure after retries
-}
-
-// Function to prompt the user
-export function promptUser(question, defaultResponse = 'no') {
-  return new Promise(resolve => {
-    const rl = readline.createInterface({
-      input: process.stdin,
-      output: process.stdout,
-    });
-    rl.question(
-      `${question} (yes/no) [default: ${defaultResponse}] `,
-      answer => {
-        rl.close();
-        resolve(answer.toLowerCase() === 'yes' ? true : false);
       },
-    );
-  });
-}
-
-export async function handleFailedOrders({
-  buyOrder,
-  sellOrder,
-  buyExchange,
-  sellExchange,
-  symbol,
-  amountToTrade,
-}) {
-  if (!buyOrder || !sellOrder) {
-    const failedSide = !buyOrder ? 'buy' : 'sell';
-    const failedExchange = !buyOrder ? buyExchange : sellExchange;
-    const successSide = buyOrder ? 'buy' : 'sell';
-    const successOrder = buyOrder || sellOrder;
-    const successExchange = buyOrder ? buyExchange : sellExchange;
-
-    console.log(`Retrying failed ${failedSide} order on ${failedExchange}...`);
-    const retryOrder = await retryOrderCreation(
-      failedExchange,
-      symbol,
-      failedSide,
-      amountToTrade,
-      null, // Assuming price is null for market orders
+      type,
+      true,
     );
 
-    if (!retryOrder) {
-      const shouldContinue = await promptUser(
-        `Failed to place ${failedSide} order on ${failedExchange} after retries. Continue trying?`,
-        'no',
-      );
-
-      if (!shouldContinue) {
-        console.log(`Closing ${successSide} position on ${successExchange}...`);
-        await closePosition(successOrder); // Close successful order
-        console.log(`${successSide} position closed.`);
-      }
+    if (!closingOrderResult) {
+      throw new Error('Failed to execute closing orders');
     }
+
+    await moveToClosedPositions(id, {
+      closeBuyPrice: selectedBuyPrice,
+      closeSellPrice: selectedSellPrice,
+    });
+
+    const closeTime = new Date().toISOString();
+    console.log(
+      `Successfully closed position for ${symbol}:`,
+      `\n- Buy Exchange: ${buyExchange}`,
+      `\n- Sell Exchange: ${sellExchange}`,
+      `\n- Amount: ${amount}`,
+      `\n- Close Time: ${closeTime}`,
+    );
+
+    return {
+      success: true,
+      closeTime,
+      closingOrders: closingOrderResult,
+      message: 'Position closed successfully',
+    };
+  } catch (error) {
+    await updateOpenPosition(id, { status: 'open' });
+
+    console.error(
+      `Failed to close position for ${symbol} on ${buyExchange}/${sellExchange}:`,
+      error.message,
+    );
+
+    throw {
+      success: false,
+      error: error.message,
+      details: {
+        symbol,
+        buyExchange,
+        sellExchange,
+        amount,
+        failureTime: Date.now(),
+      },
+    };
   }
 }
 
@@ -764,80 +608,81 @@ File: orderCreation/orderCreation.js
 --------------------------------------------------
 Content of orderCreation/orderCreation.js:
 import { storeOpenPosition } from '../utils/storeOpenPositions.js';
-import { handleFailedOrders } from './orderCreationHelpers.js';
 import { createExchangeOrder } from './orderExchangeCreation.js';
 
 // Main function
-export async function createOrder(exchanges, order, type = 'market') {
+export async function createOrder(
+  exchanges,
+  order,
+  type = 'limit',
+  isClose = false,
+) {
   const {
     symbol,
     buyExchange,
     sellExchange,
     selectedBuyPrice,
     selectedSellPrice,
+    tradeVolumeUSDT,
+    netBuyPrice,
+    netSellPrice,
     USDTPrice,
   } = order;
 
-  //! MUST be fixed!
-  const amountToTrade = order.tradeVolumeUSD / order.netBuyPrice;
+  const amountToTrade = {
+    USDT: tradeVolumeUSDT / ((netBuyPrice + netSellPrice) / 2),
+    TMN: (tradeVolumeUSDT * USDTPrice) / ((netBuyPrice + netSellPrice) / 2),
+  };
 
   console.log(
-    `Placing orders: Buy ${amountToTrade.toFixed(
+    `Placing orders: Buy ${amountToTrade[symbol.split('/')[0]].toFixed(
       6,
     )} ${symbol} on ${buyExchange}, Sell on ${sellExchange}`,
   );
 
   let buyOrder, sellOrder;
 
-  try {
-    const [buyResult, sellResult] = await Promise.all([
-      createExchangeOrder(
-        buyExchange,
-        symbol,
-        type,
-        'buy',
-        amountToTrade,
-        selectedBuyPrice,
-        exchanges,
-        USDTPrice,
-      ),
-      createExchangeOrder(
-        sellExchange,
-        symbol,
-        'sell',
-        amountToTrade,
-        selectedSellPrice,
-        exchanges,
-        USDTPrice,
-      ),
-    ]);
+  const [buyResult, sellResult] = await Promise.allSettled([
+    createExchangeOrder(
+      buyExchange,
+      symbol,
+      type,
+      'buy',
+      amountToTrade,
+      selectedBuyPrice,
+      exchanges,
+      USDTPrice,
+    ),
+    createExchangeOrder(
+      sellExchange,
+      symbol,
+      type,
+      'sell',
+      amountToTrade,
+      selectedSellPrice,
+      exchanges,
+      USDTPrice,
+    ),
+  ]);
 
-    buyOrder = buyResult;
-    sellOrder = sellResult;
-
-    console.log(`Buy order on ${buyExchange} successful.`);
-    console.log(`Sell order on ${sellExchange} successful.`);
-  } catch (error) {
-    console.error(`Error placing orders: ${error.message}`);
+  if (buyResult.status === 'fulfilled') {
+    buyOrder = buyResult.value;
+  } else {
+    console.error('Buy order failed:', buyResult.reason);
   }
 
-  // Handle failed orders
-  await handleFailedOrders({
-    buyOrder,
-    sellOrder,
-    buyExchange,
-    sellExchange,
-    symbol,
-    amountToTrade,
-  });
-
+  if (sellResult.status === 'fulfilled') {
+    sellOrder = sellResult.value;
+  } else {
+    console.error('Sell order failed:', sellResult.reason);
+  }
   // Store Open Position if successful
-  if (buyOrder && sellOrder) {
+  if (buyOrder && sellOrder && !isClose) {
     storeOpenPosition({
       symbol,
       buyExchange,
       sellExchange,
-      amount: amountToTrade,
+      amount: amountToTrade[symbol.split('/')[1]],
       entryBuyPrice: buyOrder.average,
       entrySellPrice: sellOrder.average,
     });
@@ -850,6 +695,7 @@ File: orderCreation/orderExchangeCreation.js
 Content of orderCreation/orderExchangeCreation.js:
 import axios from 'axios';
 import { CONFIG } from '../config.js';
+import { originalizeSpecialCoinOrder } from '../transforms/originalizations.js';
 
 export async function createExchangeOrder(
   exchangeId,
@@ -880,7 +726,7 @@ export async function createExchangeOrder(
         convertedSymbol,
         type,
         side,
-        amount,
+        amount.USDT,
         convertedPrice,
       );
   }
@@ -897,7 +743,8 @@ async function createNobitexOrder(symbol, type, side, amount, price) {
     transformedBase: nobitexBase,
     transformedAmount: nobitexAmount,
     transformedPrice: nobitexPrice,
-  } = originalizeSpecialCoinOrder('nobitex', base, amount, price);
+  } = originalizeSpecialCoinOrder('nobitex', base, amount[quote], price);
+
   const url = 'https://api.nobitex.ir/market/orders/add';
   const headers = {
     Authorization: `Token ${apiKey}`,
@@ -906,7 +753,7 @@ async function createNobitexOrder(symbol, type, side, amount, price) {
   };
   const dstCurrency = quote === 'TMN' ? 'rls' : 'usdt';
   let srcCurrency = nobitexBase.toLowerCase();
-  nobitexPrice = quote === 'TMN' ? nobitexPrice / 10 : nobitexPrice;
+  nobitexPrice = quote === 'TMN' ? nobitexPrice * 10 : nobitexPrice;
 
   let body = {
     type: side,
@@ -948,10 +795,10 @@ async function createWallexOrder(symbol, type, side, amount, price) {
     transformedBase: wallexBase,
     transformedAmount: wallexAmount,
     transformedPrice: wallexPrice,
-  } = originalizeSpecialCoinOrder('wallex', base, amount, price);
+  } = originalizeSpecialCoinOrder('wallex', base, amount[quote], price);
 
   // Wallex expects the symbol in a specific format (e.g., 'BTCUSDT')
-  const wallexSymbol = wallexBase + '/' + quote;
+  const wallexSymbol = wallexBase + quote;
 
   const url = 'https://api.wallex.ir/v1/order/create';
   const timestamp = Date.now();
@@ -996,8 +843,264 @@ async function createWallexOrder(symbol, type, side, amount, price) {
 function convertTMNOrderToUSDT(symbol, price, USDTPrice) {
   const convertedSymbol = symbol.replace('/TMN', '/USDT');
   const convertedPrice = price / USDTPrice;
+
   return { convertedSymbol, convertedPrice };
 }
+
+
+File: utils/database.js
+--------------------------------------------------
+Content of utils/database.js:
+import sqlite3 from 'sqlite3';
+import { CONFIG } from '../config.js';
+
+const { databaseName } = CONFIG;
+const db = new sqlite3.Database(databaseName, err => {
+  if (err) {
+    console.error('Error opening database:', err.message);
+  } else {
+    console.log('Connected to the SQLite database.');
+  }
+});
+// Extend the existing database setup
+db.serialize(() => {
+  db.run(
+    `
+        CREATE TABLE IF NOT EXISTS positions (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          symbol TEXT NOT NULL,
+          buyExchange TEXT NOT NULL,
+          sellExchange TEXT NOT NULL,
+          amount REAL NOT NULL,
+          entryBuyPrice REAL NOT NULL,
+          entrySellPrice REAL NOT NULL,
+          timestamp INTEGER NOT NULL,
+          status TEXT DEFAULT 'open'
+        )
+      `,
+    err => {
+      if (err) {
+        console.error('Error creating positions table:', err.message);
+      } else {
+        console.log('Positions table created or already exists.');
+      }
+    },
+  );
+
+  db.run(
+    `CREATE TABLE IF NOT EXISTS closed_positions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        symbol TEXT NOT NULL,
+        buyExchange TEXT NOT NULL,
+        sellExchange TEXT NOT NULL,
+        amount REAL NOT NULL,
+        entryBuyPrice REAL NOT NULL,
+        entrySellPrice REAL NOT NULL,
+        closeBuyPrice REAL NOT NULL,
+        closeSellPrice REAL NOT NULL,
+        timestamp INTEGER NOT NULL,
+        closeTimestamp INTEGER NOT NULL
+      )`,
+    err => {
+      if (err) {
+        console.error('Error creating closed_positions table:', err.message);
+      } else {
+        console.log('Closed positions table created or already exists.');
+      }
+    },
+  );
+});
+
+// Function to update an open position
+function updateOpenPosition(id, updates) {
+  return new Promise((resolve, reject) => {
+    const fields = Object.keys(updates)
+      .map(key => `${key} = ?`)
+      .join(', ');
+    const values = [...Object.values(updates), id];
+    db.run(
+      `UPDATE positions SET ${fields} WHERE id = ?`,
+      values,
+      function (err) {
+        if (err) {
+          console.error('Error updating position:', err.message);
+          reject(err);
+        } else if (this.changes === 0) {
+          reject(new Error('No position found to update'));
+        } else {
+          console.log(`Position with ID ${id} updated.`);
+          resolve();
+        }
+      },
+    );
+  });
+}
+
+// Function to move a position to the closed_positions table
+function moveToClosedPositions(positionId, closingDetails) {
+  return new Promise((resolve, reject) => {
+    db.get(
+      `SELECT * FROM positions WHERE id = ?`,
+      [positionId],
+      (err, position) => {
+        if (err) {
+          console.error('Error fetching position to close:', err.message);
+          reject(err);
+          return;
+        }
+        if (!position) {
+          reject(new Error(`Position with ID ${positionId} not found.`));
+          return;
+        }
+
+        const closeTimestamp = Date.now();
+        db.run(
+          `INSERT INTO closed_positions 
+            (symbol, buyExchange, sellExchange, amount, entryBuyPrice, entrySellPrice, closeBuyPrice, closeSellPrice, timestamp, closeTimestamp)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            position.symbol,
+            position.buyExchange,
+            position.sellExchange,
+            position.amount,
+            position.entryBuyPrice,
+            position.entrySellPrice,
+            closingDetails.closeBuyPrice,
+            closingDetails.closeSellPrice,
+            position.timestamp,
+            closeTimestamp,
+          ],
+          function (insertErr) {
+            if (insertErr) {
+              console.error(
+                'Error moving position to closed_positions:',
+                insertErr.message,
+              );
+              reject(insertErr);
+              return;
+            }
+
+            // Delete from the open positions table after moving
+            db.run(
+              `DELETE FROM positions WHERE id = ?`,
+              [positionId],
+              function (deleteErr) {
+                if (deleteErr) {
+                  console.error(
+                    'Error removing open position:',
+                    deleteErr.message,
+                  );
+                  reject(deleteErr);
+                  return;
+                }
+                console.log(
+                  `Position with ID ${positionId} moved to closed_positions.`,
+                );
+                resolve();
+              },
+            );
+          },
+        );
+      },
+    );
+  });
+}
+
+function storePosition(position) {
+  return new Promise((resolve, reject) => {
+    const {
+      symbol,
+      buyExchange,
+      sellExchange,
+      amount,
+      entryBuyPrice,
+      entrySellPrice,
+    } = position;
+    const timestamp = Date.now();
+    db.run(
+      `INSERT INTO positions (symbol, buyExchange, sellExchange, amount, entryBuyPrice, entrySellPrice, timestamp)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [
+        symbol,
+        buyExchange,
+        sellExchange,
+        amount,
+        entryBuyPrice,
+        entrySellPrice,
+        timestamp,
+      ],
+      function (err) {
+        if (err) {
+          console.error('Error storing position:', err.message);
+          reject(err);
+        } else {
+          console.log(`Position stored with ID: ${this.lastID}`);
+          resolve(this.lastID);
+        }
+      },
+    );
+  });
+}
+
+function getOpenPositions() {
+  return new Promise((resolve, reject) => {
+    db.all(`SELECT * FROM positions`, [], (err, rows) => {
+      if (err) {
+        console.error('Error fetching open positions:', err.message);
+        reject(err);
+      } else {
+        resolve(rows);
+      }
+    });
+  });
+}
+
+function removePosition(positionId) {
+  return new Promise((resolve, reject) => {
+    db.run(`DELETE FROM positions WHERE id = ?`, positionId, function (err) {
+      if (err) {
+        console.error('Error removing position:', err.message);
+        reject(err);
+      } else {
+        console.log(`Position with ID ${positionId} removed.`);
+        resolve();
+      }
+    });
+  });
+}
+
+// Close the database connection when the application exits
+process.on('exit', () => {
+  db.close(err => {
+    if (err) {
+      console.error('Error closing the database:', err.message);
+    } else {
+      console.log('Database connection closed.');
+    }
+  });
+});
+
+// Handle SIGINT (Ctrl+C) to gracefully close the database connection
+process.on('SIGINT', () => {
+  console.log('Closing database connection...');
+  db.close(err => {
+    if (err) {
+      console.error('Error closing the database:', err.message);
+    } else {
+      console.log('Database connection closed.');
+    }
+  });
+  process.exit();
+});
+
+// Export the new functions
+export {
+  storePosition,
+  getOpenPositions,
+  removePosition,
+  updateOpenPosition,
+  moveToClosedPositions,
+};
 
 
 File: utils/addTMNSymbols.js
@@ -1119,7 +1222,9 @@ export function calculateTMNPrice(allPrices, USDTPrice) {
 File: utils/storeOpenPositions.js
 --------------------------------------------------
 Content of utils/storeOpenPositions.js:
-export function storeOpenPosition({
+import { storePosition } from './database.js'; // ensure correct path
+
+export async function storeOpenPosition({
   symbol,
   buyExchange,
   sellExchange,
@@ -1127,16 +1232,15 @@ export function storeOpenPosition({
   entryBuyPrice,
   entrySellPrice,
 }) {
-  openPositions.push({
+  await storePosition({
     symbol,
     buyExchange,
     sellExchange,
     amount,
     entryBuyPrice,
     entrySellPrice,
-    timestamp: Date.now(),
   });
-  console.log('Open position stored.');
+  console.log('Open position stored in DB.');
 }
 
 
@@ -1148,15 +1252,14 @@ import { fetchOrderBooks } from '../fetch/fetchOrderBooks.js';
 export async function getVWAPs(
   exchanges,
   exchangeId,
-  symbolsAndSides,
-  tradeVolumeUSD,
+  symbols,
+  tradeVolumeUSDT,
   USDTPrice,
 ) {
   try {
-    const symbols = Object.keys(symbolsAndSides);
     const orderBooks = await fetchOrderBooks(exchanges, exchangeId, symbols);
 
-    const VWAPs = calculateVWAPs(orderBooks, tradeVolumeUSD, USDTPrice);
+    const VWAPs = calculateVWAPs(orderBooks, tradeVolumeUSDT, USDTPrice);
 
     return VWAPs;
   } catch (error) {
@@ -1166,11 +1269,11 @@ export async function getVWAPs(
 }
 
 // Calculate Volume Weighted Average Price (VWAP)
-export function calculateVWAPs(orderBooks, tradeVolumeUSD, USDTPrice) {
+export function calculateVWAPs(orderBooks, tradeVolumeUSDT, USDTPrice) {
   let VWAPs = {};
   let tradeVolume = {
-    USDT: tradeVolumeUSD,
-    TMN: tradeVolumeUSD * USDTPrice,
+    USDT: tradeVolumeUSDT,
+    TMN: tradeVolumeUSDT * USDTPrice,
   };
   for (let symbol in orderBooks) {
     VWAPs[symbol] = {};
@@ -1215,7 +1318,7 @@ import { splitSymbolsIntoQuoteAndBase } from '../utils/splitSymbols.js';
 // Fetch Nobitex L2 Order Books
 export async function fetchNobitexOrderBooks(symbols) {
   try {
-    const response = await axios.get('https://api.nobitex.ir/v2/orderbook/all');
+    const response = await axios.get('https://api.nobitex.ir/v3/orderbook/all');
     const data = response.data;
 
     if (!data) {
@@ -1235,8 +1338,6 @@ export async function fetchNobitexOrderBooks(symbols) {
 }
 
 // Fetch Wallex L2 Order Books
-//! It must skip the pairs which are not in the initial opportuninities
-//! Special coins must be taken into account
 export async function fetchWallexOrderBooks(symbols) {
   try {
     const response = await axios.get('https://api.wallex.ir/v2/depth/all');
@@ -1273,16 +1374,19 @@ export async function fetchOrderBooks(exchanges, exchangeId, symbols) {
         );
         Object.assign(orderBooks, exchangeOrderBooks);
       } else {
-        await Promise.allSettled(
-          symbols
-            .filter(symbol => !quotesMap.TMN.includes(symbol))
-            .map(async symbol => {
+        const orderBooksPromises = symbols
+          .filter(symbol => !quotesMap.TMN.includes(symbol))
+          .map(async symbol => {
+            try {
               const orderBook = await exchanges[exchangeId].fetchOrderBook(
                 symbol,
               );
               orderBooks[symbol] = orderBook;
-            }),
-        );
+            } catch (err) {
+              console.error(`Error fetching order book for ${symbol}:`, err);
+            }
+          });
+        await Promise.allSettled(orderBooksPromises);
       }
 
       console.log(
@@ -1311,7 +1415,7 @@ import { CONFIG } from '../config.js';
 export async function fetchNobitexPrices() {
   const { coinsToConsider, coinsToIgnore } = CONFIG;
   try {
-    const response = await axios.get('https://api.nobitex.ir/v2/orderbook/all');
+    const response = await axios.get('https://api.nobitex.ir/v3/orderbook/all');
     const data = response.data;
     delete data.status;
     const prices = {};
@@ -1455,11 +1559,22 @@ export async function fetchPrices(exchanges, exchangeId) {
 File: transforms/originalizations.js
 --------------------------------------------------
 Content of transforms/originalizations.js:
+import { CONFIG } from '../config.js';
+
 export function originalizeSpecialCoinOrder(exchangeId, base, amount, price) {
   const { specialCoinStandardizations } = CONFIG;
 
   const standardizations = specialCoinStandardizations[exchangeId];
-  const standardization = standardizations.filter(s => s.standardBase === base);
+  const standardization = standardizations.find(s => s.standardBase === base);
+
+  if (!standardization) {
+    // If no special standardization is found, return original values
+    return {
+      transformedBase: base,
+      transformedAmount: amount,
+      transformedPrice: price,
+    };
+  }
 
   const { originalBase, correctionFactor } = standardization;
 
@@ -1607,66 +1722,254 @@ export function standardizeSpecialCoinPrices(allPrices) {
 File: monitoring/monitoring.js
 --------------------------------------------------
 Content of monitoring/monitoring.js:
-import NodeCache from 'node-cache';
+import { CONFIG } from '../config.js';
 import { getVWAPs } from '../VWAP/VWAP.js';
-const cache = new NodeCache({ stdTTL: 600 });
-// Monitor Open Positions
-export async function monitorOpenPositions(exchanges) {
-  const key = 'openPositions';
-  const openPositions = [];
-  const cachedOpenPositions = cache.get(key);
-  if (cachedOpenPositions) {
-    openPositions = cachedOpenPositions;
-  } else {
-    openPositions = fetchOpenPositions(exchanges);
-    cache.set('openPositions', openPositions);
+import { closePosition } from '../close/closePosition.js';
+import { addTMNSymbols } from '../utils/addTMNSymbols.js';
+import { getOpenPositions } from '../utils/database.js';
+
+export async function monitorOpenPositions(exchanges, USDTPrice) {
+  const {
+    orderTypeOnClose,
+    tradeVolumeUSDT,
+    returnTypeOnClose,
+    closeMinMarginPercent,
+  } = CONFIG;
+
+  // Fetch open positions from the database
+  let openPositions = [];
+  try {
+    openPositions = await getOpenPositions();
+  } catch (error) {
+    console.error('Failed to fetch open positions from the database:', error);
+    return; // Exit early if we can't get positions
   }
 
-  for (const position of openPositions.slice()) {
+  if (!openPositions?.length) {
+    console.log('No open positions to monitor.');
+    return;
+  }
+
+  console.log('Monitoring open positions...');
+
+  const exchangeMap = {};
+
+  // Loop through each position
+  for (const position of openPositions) {
+    const { symbol, buyExchange, sellExchange } = position;
+
+    // Add symbol to buyExchange
+    if (!exchangeMap[buyExchange]) {
+      exchangeMap[buyExchange] = new Set(); // Use a Set to ensure uniqueness
+    }
+    exchangeMap[buyExchange].add(symbol);
+
+    // Add symbol to sellExchange
+    if (!exchangeMap[sellExchange]) {
+      exchangeMap[sellExchange] = new Set(); // Use a Set to ensure uniqueness
+    }
+    exchangeMap[sellExchange].add(symbol);
+  }
+
+  // Convert Sets back to arrays
+  for (const exchange in exchangeMap) {
+    exchangeMap[exchange] = Array.from(exchangeMap[exchange]);
+  }
+  const vwapResultsByExchange = {};
+  await Promise.all(
+    Object.entries(exchangeMap).map(async ([exchangeId, symbols]) => {
+      const vwapResults = await getVWAPs(
+        exchanges,
+        exchangeId,
+        symbols,
+        tradeVolumeUSDT,
+        USDTPrice,
+      );
+      vwapResultsByExchange[exchangeId] = vwapResults;
+    }),
+  );
+
+  addTMNSymbols(vwapResultsByExchange, USDTPrice);
+
+  const finalReturns = calculateFinalReturnsFromOpenPositions(
+    openPositions,
+    vwapResultsByExchange,
+    returnTypeOnClose,
+    USDTPrice,
+  );
+
+  await processPositionsConcurrently(
+    finalReturns,
+    exchanges,
+    closeMinMarginPercent,
+    orderTypeOnClose,
+  );
+
+  console.log('Finished monitoring open positions.');
+}
+
+export function calculateFinalReturnsFromOpenPositions(
+  openPositions,
+  vwapResultsByExchange,
+  returnTypeOnClose,
+  USDTPrice,
+) {
+  const { fees, slippage } = CONFIG;
+  const finalReturns = [];
+  for (const openPosition of openPositions) {
     const {
+      id,
+      symbol,
+      buyExchange,
+      sellExchange,
+      entryBuyPrice,
+      entrySellPrice,
+    } = openPosition;
+
+    const buyVWAP = vwapResultsByExchange[sellExchange][symbol]?.asks;
+    const sellVWAP = vwapResultsByExchange[buyExchange][symbol]?.bids;
+
+    if (!buyVWAP || !sellVWAP) continue;
+
+    const buyFee = fees[sellExchange].taker;
+    const sellFee = fees[buyExchange].taker;
+
+    const netBuyPrice = buyVWAP * (1 + buyFee);
+    const netSellPrice = sellVWAP * (1 - sellFee);
+
+    const profitSellExhange = entrySellPrice - netBuyPrice;
+    const profitBuyExhange = netSellPrice - entryBuyPrice;
+    const profit = profitBuyExhange + profitSellExhange;
+
+    const returnPercentage = (profit / entrySellPrice + entryBuyPrice) * 100;
+
+    // Calculate slippage-adjusted prices
+    const netSellPriceWithSlippage = netSellPrice * (1 - slippage);
+    const netBuyPriceWithSlippage = netBuyPrice * (1 + slippage);
+
+    // Profit with slippage
+    const profitSellExchangeWithSlippage =
+      entrySellPrice - netBuyPriceWithSlippage;
+    const profitBuyExchangeWithSlippage =
+      netSellPriceWithSlippage - entryBuyPrice;
+    const profitWithSlippage =
+      profitSellExchangeWithSlippage + profitBuyExchangeWithSlippage;
+
+    const returnPercentageWithSlippage =
+      profitWithSlippage / (entrySellPrice + entryBuyPrice);
+
+    let selectedBuyPrice;
+    let selectedSellPrice;
+    switch (returnTypeOnClose) {
+      case 'slip':
+        selectedBuyPrice = netBuyPriceWithSlippage;
+        selectedSellPrice = netSellPriceWithSlippage;
+        break;
+
+      default:
+        selectedBuyPrice = netBuyPrice;
+        selectedSellPrice = netSellPrice;
+        break;
+    }
+
+    const selectedReturnPercentage =
+      ((selectedSellPrice - selectedBuyPrice) /
+        (selectedSellPrice + selectedBuyPrice)) *
+      100;
+
+    finalReturns.push({
+      openPosition,
+      id: openPosition?.id,
+      symbol,
+      buyExchange,
+      sellExchange,
+      selectedBuyPrice,
+      selectedSellPrice,
+      selectedReturnPercentage,
+      netBuyPrice,
+      netSellPrice,
+      returnPercentage,
+      netBuyPriceWithSlippage,
+      netSellPriceWithSlippage,
+      returnPercentageWithSlippage,
+      tradeVolumeUSDT,
+      USDTPrice,
+    });
+  }
+}
+
+const processPositionsConcurrently = async (
+  finalReturns,
+  exchanges,
+  closeMinMarginPercent,
+  orderTypeOnClose,
+) => {
+  // Map finalReturns to an array of promises
+  const promises = finalReturns.map(async finalReturn => {
+    const {
+      id,
       symbol,
       buyExchange,
       sellExchange,
       amount,
       entryBuyPrice,
       entrySellPrice,
-    } = position;
+      selectedReturnPercentage, // Added for margin check
+    } = finalReturn;
 
-    const tradeVolumeUSD = amount * entryBuyPrice;
+    const position = {
+      id,
+      symbol,
+      buyExchange,
+      sellExchange,
+      amount,
+      entryBuyPrice,
+      entrySellPrice,
+    };
 
-    const [currentBuyVWAP, currentSellVWAP] = await Promise.all([
-      getVWAPs(buyExchange, symbol, tradeVolumeUSD, 'sell'),
-      getVWAPs(sellExchange, symbol, tradeVolumeUSD, 'buy'),
-    ]);
+    try {
+      console.log(
+        `Position ${symbol} on ${buyExchange}/${sellExchange}: Current Return: ${selectedReturnPercentage.toFixed(
+          2,
+        )}%`,
+      );
 
-    if (!currentBuyVWAP || !currentSellVWAP) {
-      continue;
+      // Skip if exit condition is not met
+      if (selectedReturnPercentage < closeMinMarginPercent) {
+        console.log(`Exit condition not met for ${symbol}. Skipping...`);
+        return; // Skip further processing for this position
+      }
+
+      console.log(
+        `Exit condition met for ${symbol} on ${buyExchange}/${sellExchange}. Closing position...`,
+      );
+
+      // Close the position
+      await closePosition(exchanges, position, orderTypeOnClose);
+    } catch (error) {
+      console.error(
+        `Error monitoring position ${symbol} on ${buyExchange}/${sellExchange}:`,
+        error.message,
+      );
     }
+  });
 
-    const buyFee = CONFIG.fees[buyExchange].taker;
-    const sellFee = CONFIG.fees[sellExchange].taker;
+  // Execute all promises concurrently and wait for completion
+  const results = await Promise.allSettled(promises);
 
-    const netCurrentBuyPrice = currentBuyVWAP * (1 - buyFee);
-    const netCurrentSellPrice = currentSellVWAP * (1 + sellFee);
-
-    const profit = (netCurrentSellPrice - netCurrentBuyPrice) * amount;
-    const returnPercentage = (profit / (entryBuyPrice * amount)) * 100;
-
-    console.log(
-      `Position ${coin}/${quote} on ${buyExchange}/${sellExchange}: Return ${returnPercentage.toFixed(
-        2,
-      )}%`,
-    );
-
-    // Exit conditions
-    if (
-      returnPercentage >= CONFIG.minMarginPercent * 2 ||
-      returnPercentage <= -CONFIG.minMarginPercent
-    ) {
-      await closePosition(position);
-      openPositions.splice(openPositions.indexOf(position), 1);
+  // Log the results
+  results.forEach((result, index) => {
+    if (result.status === 'fulfilled') {
+      console.log(
+        `Successfully processed position ${finalReturns[index].symbol}`,
+      );
+    } else {
+      console.error(
+        `Failed to process position ${finalReturns[index].symbol}:`,
+        result.reason,
+      );
     }
-  }
-}
+  });
+};
 
 

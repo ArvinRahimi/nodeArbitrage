@@ -2,7 +2,7 @@
 export const CONFIG = {
   minMarginPercent: 0.5, // Minimum margin percentage to consider
   minVolumeUSD: 10, // Minimum trade volume in USDT
-  returnTypeOnOpen: 'spread', // enum: [null, 'slip', 'spread']]
+  returnTypeOnOpen: 'spread', // enum: [null, 'slip', 'spread']
   returnTypeOnClose: null, // enum: [null, 'slip']
   closeMinMarginPercent: 0.4,
   orderTypeOnOpen: 'limit',

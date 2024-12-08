@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { CONFIG } from '../config.js';
+import { originalizeSpecialCoinOrder } from '../transforms/originalizations.js';
 
 export async function createExchangeOrder(
   exchangeId,
@@ -48,6 +49,7 @@ async function createNobitexOrder(symbol, type, side, amount, price) {
     transformedAmount: nobitexAmount,
     transformedPrice: nobitexPrice,
   } = originalizeSpecialCoinOrder('nobitex', base, amount[quote], price);
+
   const url = 'https://api.nobitex.ir/market/orders/add';
   const headers = {
     Authorization: `Token ${apiKey}`,

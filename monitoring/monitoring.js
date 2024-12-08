@@ -1,10 +1,7 @@
 import { CONFIG } from '../config.js';
 import { getVWAPs } from '../VWAP/VWAP.js';
 import { closePosition } from '../close/closePosition.js';
-import { fetchOrderBooks } from '../fetch/fetchOrderBooks.js';
-import { fetchPrices } from '../fetch/fetchPrices.js';
 import { addTMNSymbols } from '../utils/addTMNSymbols.js';
-import { calculateVWAPs } from '../VWAP/VWAP.js';
 import { getOpenPositions } from '../utils/database.js';
 
 export async function monitorOpenPositions(exchanges, USDTPrice) {
@@ -34,12 +31,21 @@ export async function monitorOpenPositions(exchanges, USDTPrice) {
   const exchangeMap = {};
 
   // Loop through each position
-  await processPositionsConcurrently(
-    finalReturns,
-    exchanges,
-    closeMinMarginPercent,
-    orderTypeOnClose,
-  );
+  for (const position of openPositions) {
+    const { symbol, buyExchange, sellExchange } = position;
+
+    // Add symbol to buyExchange
+    if (!exchangeMap[buyExchange]) {
+      exchangeMap[buyExchange] = new Set(); // Use a Set to ensure uniqueness
+    }
+    exchangeMap[buyExchange].add(symbol);
+
+    // Add symbol to sellExchange
+    if (!exchangeMap[sellExchange]) {
+      exchangeMap[sellExchange] = new Set(); // Use a Set to ensure uniqueness
+    }
+    exchangeMap[sellExchange].add(symbol);
+  }
 
   // Convert Sets back to arrays
   for (const exchange in exchangeMap) {
@@ -65,51 +71,15 @@ export async function monitorOpenPositions(exchanges, USDTPrice) {
     openPositions,
     vwapResultsByExchange,
     returnTypeOnClose,
+    USDTPrice,
   );
-  //!---------------------------------------!//
-  for (const finalReturn of finalReturns) {
-    const {
-      id,
-      symbol,
-      buyExchange,
-      sellExchange,
-      amount,
-      entryBuyPrice,
-      entrySellPrice,
-    } = finalReturn;
 
-    const position = {
-      id,
-      symbol,
-      buyExchange,
-      sellExchange,
-      amount,
-      entryBuyPrice,
-      entrySellPrice,
-    };
-
-    try {
-      console.log(
-        `Position ${symbol} on ${buyExchange}/${sellExchange}: Current Return: ${returnPercentage.toFixed(
-          2,
-        )}%`,
-      );
-
-      if (finalReturn.selectedReturnPercentage < closeMinMarginPercent)
-        continue;
-
-      console.log(
-        `Exit condition met for ${symbol} on ${buyExchange}/${sellExchange}. Closing position...`,
-      );
-
-      await closePosition(exchanges, position, orderTypeOnClose);
-    } catch (error) {
-      console.error(
-        `Error monitoring position ${symbol} on ${buyExchange}/${sellExchange}:`,
-        error.message,
-      );
-    }
-  }
+  await processPositionsConcurrently(
+    finalReturns,
+    exchanges,
+    closeMinMarginPercent,
+    orderTypeOnClose,
+  );
 
   console.log('Finished monitoring open positions.');
 }
@@ -118,8 +88,9 @@ export function calculateFinalReturnsFromOpenPositions(
   openPositions,
   vwapResultsByExchange,
   returnTypeOnClose,
+  USDTPrice,
 ) {
-  const { fees } = CONFIG;
+  const { fees, slippage } = CONFIG;
   const finalReturns = [];
   for (const openPosition of openPositions) {
     const {
@@ -146,7 +117,7 @@ export function calculateFinalReturnsFromOpenPositions(
     const profitBuyExhange = netSellPrice - entryBuyPrice;
     const profit = profitBuyExhange + profitSellExhange;
 
-    const returnPercentage = (profit / entrySellPrice + entrySellPrice) * 100;
+    const returnPercentage = (profit / entrySellPrice + entryBuyPrice) * 100;
 
     // Calculate slippage-adjusted prices
     const netSellPriceWithSlippage = netSellPrice * (1 - slippage);
@@ -169,14 +140,18 @@ export function calculateFinalReturnsFromOpenPositions(
       case 'slip':
         selectedBuyPrice = netBuyPriceWithSlippage;
         selectedSellPrice = netSellPriceWithSlippage;
+        break;
 
       default:
         selectedBuyPrice = netBuyPrice;
         selectedSellPrice = netSellPrice;
+        break;
     }
 
     const selectedReturnPercentage =
-      ((selectedSellPrice - selectedBuyPrice) / selectedSellPrice) * 100;
+      ((selectedSellPrice - selectedBuyPrice) /
+        (selectedSellPrice + selectedBuyPrice)) *
+      100;
 
     finalReturns.push({
       openPosition,
@@ -197,6 +172,7 @@ export function calculateFinalReturnsFromOpenPositions(
       USDTPrice,
     });
   }
+  return finalReturns;
 }
 
 const processPositionsConcurrently = async (

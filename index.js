@@ -42,8 +42,6 @@ for (const id of exchangesToUse) {
 }
 
 // Main Execution Function
-let openPositions = [];
-
 async function main() {
   while (true) {
     try {
@@ -86,14 +84,14 @@ async function main() {
         const order = finalReturns[0];
 
         console.log('hi');
-        //await createOrder(exchanges, order, orderTypeOnOpen);
+        await createOrder(exchanges, order, orderTypeOnOpen);
       }
 
       if (!finalReturns?.length) {
         console.log('No profitable position available!');
       }
 
-      for (const finalReturn of finalReturns.slice(0, 3)) {
+      for (const finalReturn of finalReturns?.slice(0, 3)) {
         console.log(
           `Position: Long ${finalReturn.symbol} on ${
             finalReturn.buyExchange
@@ -108,9 +106,9 @@ async function main() {
       }
 
       // Monitor open positions
-      //await monitorOpenPositions(exchanges, USDTPrice);
+      await monitorOpenPositions(exchanges, USDTPrice);
       console.log('-----------------------------\n\n');
-      if (finalReturns?.length) break;
+
       // Wait before next iteration
       await new Promise(resolve => setTimeout(resolve, refreshIntervalMs));
     } catch (error) {

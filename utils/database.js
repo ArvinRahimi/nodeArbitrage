@@ -12,6 +12,29 @@ const db = new sqlite3.Database(databaseName, err => {
 // Extend the existing database setup
 db.serialize(() => {
   db.run(
+    `
+        CREATE TABLE IF NOT EXISTS positions (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          symbol TEXT NOT NULL,
+          buyExchange TEXT NOT NULL,
+          sellExchange TEXT NOT NULL,
+          amount REAL NOT NULL,
+          entryBuyPrice REAL NOT NULL,
+          entrySellPrice REAL NOT NULL,
+          timestamp INTEGER NOT NULL,
+          status TEXT DEFAULT 'open'
+        )
+      `,
+    err => {
+      if (err) {
+        console.error('Error creating positions table:', err.message);
+      } else {
+        console.log('Positions table created or already exists.');
+      }
+    },
+  );
+
+  db.run(
     `CREATE TABLE IF NOT EXISTS closed_positions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         symbol TEXT NOT NULL,
@@ -129,6 +152,93 @@ function moveToClosedPositions(positionId, closingDetails) {
     );
   });
 }
+
+function storePosition(position) {
+  return new Promise((resolve, reject) => {
+    const {
+      symbol,
+      buyExchange,
+      sellExchange,
+      amount,
+      entryBuyPrice,
+      entrySellPrice,
+    } = position;
+    const timestamp = Date.now();
+    db.run(
+      `INSERT INTO positions (symbol, buyExchange, sellExchange, amount, entryBuyPrice, entrySellPrice, timestamp)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [
+        symbol,
+        buyExchange,
+        sellExchange,
+        amount,
+        entryBuyPrice,
+        entrySellPrice,
+        timestamp,
+      ],
+      function (err) {
+        if (err) {
+          console.error('Error storing position:', err.message);
+          reject(err);
+        } else {
+          console.log(`Position stored with ID: ${this.lastID}`);
+          resolve(this.lastID);
+        }
+      },
+    );
+  });
+}
+
+function getOpenPositions() {
+  return new Promise((resolve, reject) => {
+    db.all(`SELECT * FROM positions`, [], (err, rows) => {
+      if (err) {
+        console.error('Error fetching open positions:', err.message);
+        reject(err);
+      } else {
+        resolve(rows);
+      }
+    });
+  });
+}
+
+function removePosition(positionId) {
+  return new Promise((resolve, reject) => {
+    db.run(`DELETE FROM positions WHERE id = ?`, positionId, function (err) {
+      if (err) {
+        console.error('Error removing position:', err.message);
+        reject(err);
+      } else {
+        console.log(`Position with ID ${positionId} removed.`);
+        resolve();
+      }
+    });
+  });
+}
+
+// Close the database connection when the application exits
+process.on('exit', () => {
+  db.close(err => {
+    if (err) {
+      console.error('Error closing the database:', err.message);
+    } else {
+      console.log('Database connection closed.');
+    }
+  });
+});
+
+// Handle SIGINT (Ctrl+C) to gracefully close the database connection
+process.on('SIGINT', () => {
+  console.log('Closing database connection...');
+  db.close(err => {
+    if (err) {
+      console.error('Error closing the database:', err.message);
+    } else {
+      console.log('Database connection closed.');
+    }
+  });
+  process.exit();
+});
 
 // Export the new functions
 export {

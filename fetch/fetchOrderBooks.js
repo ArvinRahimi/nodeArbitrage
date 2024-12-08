@@ -28,8 +28,6 @@ export async function fetchNobitexOrderBooks(symbols) {
 }
 
 // Fetch Wallex L2 Order Books
-//! It must skip the pairs which are not in the initial opportuninities
-//! Special coins must be taken into account
 export async function fetchWallexOrderBooks(symbols) {
   try {
     const response = await axios.get('https://api.wallex.ir/v2/depth/all');
@@ -66,16 +64,19 @@ export async function fetchOrderBooks(exchanges, exchangeId, symbols) {
         );
         Object.assign(orderBooks, exchangeOrderBooks);
       } else {
-        await Promise.allSettled(
-          symbols
-            .filter(symbol => !quotesMap.TMN.includes(symbol))
-            .map(async symbol => {
+        const orderBooksPromises = symbols
+          .filter(symbol => !quotesMap.TMN.includes(symbol))
+          .map(async symbol => {
+            try {
               const orderBook = await exchanges[exchangeId].fetchOrderBook(
                 symbol,
               );
               orderBooks[symbol] = orderBook;
-            }),
-        );
+            } catch (err) {
+              console.error(`Error fetching order book for ${symbol}:`, err);
+            }
+          });
+        await Promise.allSettled(orderBooksPromises);
       }
 
       console.log(

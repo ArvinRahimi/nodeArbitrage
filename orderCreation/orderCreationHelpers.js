@@ -1,4 +1,5 @@
 import readline from 'readline';
+import { setTimeout, clearTimeout } from 'timers';
 
 // Function to retry order placement
 export async function retryOrderCreation(
@@ -40,17 +41,24 @@ export async function retryOrderCreation(
 }
 
 // Function to prompt the user
-export function promptUser(question, defaultResponse = 'no') {
+export function promptUser(question, defaultResponse = 'no', timeout = 5000) {
   return new Promise(resolve => {
     const rl = readline.createInterface({
       input: process.stdin,
       output: process.stdout,
     });
+
+    const timeoutId = setTimeout(() => {
+      rl.close();
+      resolve(defaultResponse.toLowerCase() === 'yes');
+    }, timeout);
+
     rl.question(
       `${question} (yes/no) [default: ${defaultResponse}] `,
       answer => {
+        clearTimeout(timeoutId);
         rl.close();
-        resolve(answer.toLowerCase() === 'yes' ? true : false);
+        resolve(answer.toLowerCase().trim() === 'yes');
       },
     );
   });

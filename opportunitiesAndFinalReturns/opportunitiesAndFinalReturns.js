@@ -97,10 +97,11 @@ export async function calculateFinalReturns(
   opportunities,
   exchanges,
   USDTPrice,
+  returnTypeOnOpen = null, // enum: [null, 'slip', 'spread']]
 ) {
-  const { fees, leverage, minVolumeUSD, slippage, minMarginPercent } = CONFIG;
+  const { fees, leverage, minVolumeUSD, slippage } = CONFIG;
 
-  const tradeVolumeUSD = minVolumeUSD * leverage;
+  const tradeVolumeUSDT = minVolumeUSD * leverage;
 
   const symbolsAndSidesByExchange = {};
 
@@ -135,19 +136,33 @@ export async function calculateFinalReturns(
         const vwapResults = await getVWAPs(
           exchanges,
           exchangeId,
-          symbolsAndSides,
-          tradeVolumeUSD,
+          Object.keys(symbolsAndSides),
+          tradeVolumeUSDT,
           USDTPrice,
         );
         vwapResultsByExchange[exchangeId] = vwapResults;
       },
     ),
   );
-
+  console.log('COMPLETE: Order books fetched\n');
   addTMNSymbols(vwapResultsByExchange, USDTPrice);
 
-  const finalReturns = [];
+  const finalReturns = calculateFinalReturnsFromOpportunities(
+    opportunities,
+    vwapResultsByExchange,
+    returnTypeOnOpen,
+  );
 
+  return finalReturns;
+}
+
+export function calculateFinalReturnsFromOpportunities(
+  opportunities,
+  vwapResultsByExchange,
+  returnTypeOnOpen,
+) {
+  const fees = CONFIG?.fees;
+  const finalReturns = [];
   for (const opportunity of opportunities) {
     const { symbol, buyExchange, sellExchange } = opportunity;
 
@@ -176,22 +191,42 @@ export async function calculateFinalReturns(
     const returnPercentageWithSlippage =
       (profitWithSlippage / netSellPriceWithSlippage) * 100;
 
-    const netSellPriceWithSlippageAndSpread = netSellPrice * (1 - slippage);
-    const netBuyPriceWithSlippageAndSpread = netBuyPrice * (1 + slippage);
+    const netSellPriceWithSlippageAndSpread =
+      netSellPriceWithSlippage - spreadBuyExchange;
+    const netBuyPriceWithSlippageAndSpread =
+      netBuyPriceWithSlippage + spreadSellExchange;
     const profitWithSlippageAndSpread =
-      netSellPriceWithSlippageAndSpread -
-      netBuyPriceWithSlippageAndSpread -
-      (spreadBuyExchange + spreadSellExchange);
+      netSellPriceWithSlippageAndSpread - netBuyPriceWithSlippageAndSpread;
     const returnPercentageWithSlippageAndSpread =
       (profitWithSlippageAndSpread / netSellPriceWithSlippageAndSpread) * 100;
+
+    let selectedBuyPrice;
+    let selectedSellPrice;
+    switch (returnTypeOnOpen) {
+      case 'slip':
+        selectedBuyPrice = netBuyPriceWithSlippage;
+        selectedSellPrice = netSellPriceWithSlippage;
+
+      case 'spread':
+        selectedBuyPrice = netBuyPriceWithSlippageAndSpread;
+        selectedSellPrice = netSellPriceWithSlippageAndSpread;
+
+      default:
+        selectedBuyPrice = netBuyPrice;
+        selectedSellPrice = netSellPrice;
+    }
+
+    const selectedReturnPercentage =
+      ((selectedSellPrice - selectedBuyPrice) / selectedSellPrice) * 100;
 
     finalReturns.push({
       opportunity,
       symbol,
       buyExchange,
       sellExchange,
-      selectedBuyPrice: netBuyPriceWithSlippageAndSpread,
-      selectedSellPrice: netSellPriceWithSlippageAndSpread,
+      selectedBuyPrice,
+      selectedSellPrice,
+      selectedReturnPercentage,
       netBuyPrice,
       netSellPrice,
       returnPercentage,
@@ -201,10 +236,8 @@ export async function calculateFinalReturns(
       netBuyPriceWithSlippageAndSpread,
       netSellPriceWithSlippageAndSpread,
       returnPercentageWithSlippageAndSpread,
-      tradeVolumeUSD,
+      tradeVolumeUSDT,
       USDTPrice,
     });
   }
-
-  return finalReturns;
 }

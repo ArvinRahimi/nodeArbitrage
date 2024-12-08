@@ -3,15 +3,14 @@ import { fetchOrderBooks } from '../fetch/fetchOrderBooks.js';
 export async function getVWAPs(
   exchanges,
   exchangeId,
-  symbolsAndSides,
-  tradeVolumeUSD,
+  symbols,
+  tradeVolumeUSDT,
   USDTPrice,
 ) {
   try {
-    const symbols = Object.keys(symbolsAndSides);
     const orderBooks = await fetchOrderBooks(exchanges, exchangeId, symbols);
 
-    const VWAPs = calculateVWAPs(orderBooks, tradeVolumeUSD, USDTPrice);
+    const VWAPs = calculateVWAPs(orderBooks, tradeVolumeUSDT, USDTPrice);
 
     return VWAPs;
   } catch (error) {
@@ -21,11 +20,11 @@ export async function getVWAPs(
 }
 
 // Calculate Volume Weighted Average Price (VWAP)
-export function calculateVWAPs(orderBooks, tradeVolumeUSD, USDTPrice) {
+export function calculateVWAPs(orderBooks, tradeVolumeUSDT, USDTPrice) {
   let VWAPs = {};
   let tradeVolume = {
-    USDT: tradeVolumeUSD,
-    TMN: tradeVolumeUSD * USDTPrice,
+    USDT: tradeVolumeUSDT,
+    TMN: tradeVolumeUSDT * USDTPrice,
   };
   for (let symbol in orderBooks) {
     VWAPs[symbol] = {};
@@ -53,6 +52,5 @@ export function calculateVWAPs(orderBooks, tradeVolumeUSD, USDTPrice) {
     }
     VWAPs[symbol].spread = VWAPs[symbol]?.asks - VWAPs[symbol]?.bids;
   }
-
   return VWAPs;
 }

@@ -1,0 +1,1672 @@
+Directory Structure:
+-------------------
+/ 
+├── close/
+│   └── closePosition.js
+├── fetch/
+│   ├── fetchOrderBooks.js
+│   └── fetchPrices.js
+├── monitoring/
+│   └── monitoring.js
+├── opportunitiesAndFinalReturns/
+│   └── opportunitiesAndFinalReturns.js
+├── orderCreation/
+│   ├── orderCreation.js
+│   ├── orderCreationHelpers.js
+│   └── orderExchangeCreation.js
+├── transforms/
+│   ├── originalizations.js
+│   └── standardizations.js
+├── utils/
+│   ├── addTMNSymbols.js
+│   ├── calculateTMNPrice.js
+│   ├── splitSymbols.js
+│   └── storeOpenPositions.js
+├── VWAP/
+│   └── VWAP.js
+├── config.js
+├── dump.py
+└── index.js
+
+File Contents:
+--------------
+File: ./index.js
+--------------------------------------------------
+Content of ./index.js:
+// Import required libraries
+
+import ccxt from 'ccxt';
+import dotenv from 'dotenv';
+import { standardizeSpecialCoinPrices } from './transforms/standardizations.js';
+import { fetchAllPrices } from './fetch/fetchPrices.js';
+import {
+  calculateFinalReturns,
+  findArbitrageOpportunities,
+} from './opportunitiesAndFinalReturns/opportunitiesAndFinalReturns.js';
+import { calculateTMNPrice } from './utils/calculateTMNPrice.js';
+import { CONFIG } from './config.js';
+import { createOrder } from './orderCreation/orderCreation.js';
+import { monitorOpenPositions } from './monitoring/monitoring.js';
+
+dotenv.config();
+const {
+  exchangesToUse,
+  exchangeParams,
+  customExchanges,
+  minMarginPercent,
+  returnType,
+} = CONFIG;
+// Initialize exchanges
+const exchanges = {};
+
+// Initialize ccxt exchanges
+for (const id of exchangesToUse) {
+  if (ccxt.exchanges.includes(id) && !customExchanges.includes(id)) {
+    exchanges[id] = new ccxt[id]({
+      apiKey: exchangeParams[id]?.apiKey,
+      secret: exchangeParams[id]?.secret,
+      options: exchangeParams[id]?.options,
+      enableRateLimit: true,
+    });
+  } else if (!customExchanges.includes(id)) {
+    throw new Error(`Unsupported exchange: ${id}`);
+  }
+}
+
+// Main Execution Function
+let openPositions = [];
+
+async function main() {
+  while (true) {
+    try {
+      const allPrices = await fetchAllPrices(exchanges);
+
+      console.log('COMPLETE: Price fetching\n');
+
+      const nobitexUSDTPrice =
+        (allPrices.nobitex['USDT/TMN'].ask +
+          allPrices.nobitex['USDT/TMN'].bid) /
+        2;
+      const wallexUSDTPrice =
+        (allPrices.wallex['USDT/TMN'].ask + allPrices.wallex['USDT/TMN'].bid) /
+        2;
+      const USDTPrice = (nobitexUSDTPrice + wallexUSDTPrice) / 2;
+
+      standardizeSpecialCoinPrices(allPrices);
+      calculateTMNPrice(allPrices, USDTPrice);
+
+      const opportunities = findArbitrageOpportunities(allPrices);
+
+      let finalReturns = await calculateFinalReturns(
+        opportunities,
+        exchanges,
+        USDTPrice,
+        returnType,
+      );
+
+      finalReturns = finalReturns
+        .filter(
+          finalReturn =>
+            finalReturn.selectedReturnPercentage > minMarginPercent /* &&
+            customExchanges.includes(finalReturn.buyExchange) &&
+            !customExchanges.includes(finalReturn.sellExchange), */,
+        )
+        .sort(
+          (a, b) => b.selectedReturnPercentage - a.selectedReturnPercentage,
+        );
+
+      if (finalReturns?.length) {
+        for (const finalReturn of finalReturns) {
+          let order = finalReturn;
+          if (order.selectedReturnPercentage < 4) {
+            //await createOrder(exchanges, order);
+            break;
+          }
+        }
+      }
+
+      if (!finalReturns?.length) {
+        console.log('No profitable position available!');
+      }
+
+      for (const finalReturn of finalReturns.slice(0, 3)) {
+        console.log(
+          `Position: Long ${finalReturn.symbol} on ${
+            finalReturn.buyExchange
+          } at ${finalReturn.selectedBuyPrice.toFixed(6)}, Short on ${
+            finalReturn.sellExchange
+          } at ${finalReturn.selectedSellPrice.toFixed(
+            6,
+          )}, Expected Return: ${finalReturn.selectedReturnPercentage.toFixed(
+            2,
+          )}%`,
+        );
+      }
+
+      // Monitor open positions
+      //await monitorOpenPositions();
+      console.log('-----------------------------\n\n');
+      if (finalReturns?.length) break;
+      // Wait before next iteration
+      await new Promise(resolve =>
+        setTimeout(resolve, CONFIG.refreshIntervalMs),
+      );
+    } catch (error) {
+      console.error('An error occurred:', error.message);
+      // Wait before next iteration in case of error
+      await new Promise(resolve =>
+        setTimeout(resolve, CONFIG.refreshIntervalMs),
+      );
+    }
+  }
+}
+
+// Start the script
+main();
+
+
+File: ./config.js
+--------------------------------------------------
+Content of ./config.js:
+// Configuration
+export const CONFIG = {
+  minMarginPercent: 0.5, // Minimum margin percentage to consider
+  minVolumeUSD: 10, // Minimum trade volume in USD
+  returnType: 'spread', // enum: [null, 'slip', 'spread']]
+  leverage: 1, // Leverage for positions
+  refreshIntervalMs: 10000, // Interval to refresh data in milliseconds
+  fees: {
+    coinex: { maker: 0.0015, taker: 0.0015 },
+    nobitex: { maker: 0.0015, taker: 0.0015 },
+    wallex: { maker: 0.001, taker: 0.001 },
+  },
+  slippage: 0.0005,
+  exchangesToUse: ['coinex', 'nobitex', 'wallex'],
+  customExchanges: ['nobitex', 'wallex'],
+  coinsToConsider: null, // null means all coins
+  coinsToIgnore: ['OMG', 'X', 'BCH'],
+  specialCoinStandardizations: {
+    nobitex: [
+      {
+        originalBase: '100K_FLOKI',
+        standardBase: 'FLOKI',
+        correctionFactor: 1e-5,
+      },
+      {
+        originalBase: '1B_BABYDOGE',
+        standardBase: 'BABYDOGE',
+        correctionFactor: 1e-9,
+      },
+      {
+        originalBase: '1M_BTT',
+        standardBase: 'BTT',
+        correctionFactor: 1e-6,
+      },
+      {
+        originalBase: '1M_NFT',
+        standardBase: 'NFT',
+        correctionFactor: 1e-6,
+      },
+      {
+        originalBase: '1M_PEPE',
+        standardBase: 'PEPE',
+        correctionFactor: 1e-6,
+      },
+      {
+        originalBase: 'SHIB',
+        standardBase: 'SHIB',
+        correctionFactor: 1e-3,
+      },
+    ],
+    wallex: [
+      {
+        originalBase: '1BBABYDOGE',
+        standardBase: 'BABYDOGE',
+        correctionFactor: 1e-9,
+      },
+    ],
+  },
+  exchangeParams: {
+    coinex: {
+      apiKey: process.env.COINEX_API_KEY,
+      secret: process.env.COINEX_SECRET_KEY,
+      options: {
+        defaultType: 'future',
+      },
+    },
+    nobitex: {
+      apiKey: process.env.NOBITEX_API_KEY,
+      secret: process.env.NOBITEX_SECRET_KEY,
+    },
+    wallex: {
+      apiKey: process.env.WALLEX_API_KEY,
+      secret: process.env.WALLEX_SECRET_KEY,
+    },
+  },
+};
+
+
+File: ./dump.py
+--------------------------------------------------
+Content of ./dump.py:
+import os
+import sys
+from typing import List, Set, Optional
+import fnmatch
+
+def parse_exclusion_file(file_path: str) -> Set[str]:
+    patterns = set()
+    if file_path and os.path.exists(file_path):
+        with open(file_path, 'r') as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith('#'):
+                    patterns.add(line)
+    return patterns
+
+def is_excluded(path: str, exclusion_patterns: Set[str]) -> bool:
+    for pattern in exclusion_patterns:
+        if pattern.startswith('/') and pattern.endswith('/'):
+            if path.startswith(pattern[1:]) or path == pattern[1:-1]:
+                return True
+        elif pattern.endswith('/'):
+            if path.startswith(pattern) or path == pattern[:-1]:
+                return True
+        elif pattern.startswith('/'):
+            if path == pattern[1:] or path.startswith(pattern[1:] + os.sep):
+                return True
+        else:
+            if fnmatch.fnmatch(path, pattern) or any(fnmatch.fnmatch(part, pattern) for part in path.split(os.sep)):
+                return True
+    return False
+
+def print_directory_structure(start_path: str, exclusion_patterns: Set[str]) -> str:
+    def _generate_tree(dir_path: str, prefix: str = '') -> List[str]:
+        entries = os.listdir(dir_path)
+        entries = sorted(entries, key=lambda x: (not os.path.isdir(os.path.join(dir_path, x)), x.lower()))
+        tree = []
+        for i, entry in enumerate(entries):
+            rel_path = os.path.relpath(os.path.join(dir_path, entry), start_path)
+            if is_excluded(rel_path, exclusion_patterns):
+                continue
+            
+            if i == len(entries) - 1:
+                connector = '└── '
+                new_prefix = prefix + '    '
+            else:
+                connector = '├── '
+                new_prefix = prefix + '│   '
+            
+            full_path = os.path.join(dir_path, entry)
+            if os.path.isdir(full_path):
+                tree.append(f"{prefix}{connector}{entry}/")
+                tree.extend(_generate_tree(full_path, new_prefix))
+            else:
+                tree.append(f"{prefix}{connector}{entry}")
+        return tree
+
+    tree = ['/ '] + _generate_tree(start_path)
+    return '\n'.join(tree)
+
+def scan_folder(start_path: str, file_types: Optional[List[str]], output_file: str, exclusion_patterns: Set[str]) -> None:
+    with open(output_file, 'w', encoding='utf-8') as out_file:
+        # Write the directory structure
+        out_file.write("Directory Structure:\n")
+        out_file.write("-------------------\n")
+        out_file.write(print_directory_structure(start_path, exclusion_patterns))
+        out_file.write("\n\n")
+        out_file.write("File Contents:\n")
+        out_file.write("--------------\n")
+
+        for root, dirs, files in os.walk(start_path):
+            rel_path = os.path.relpath(root, start_path)
+            
+            if is_excluded(rel_path, exclusion_patterns):
+                continue
+            
+            for file in files:
+                file_rel_path = os.path.join(rel_path, file)
+                if is_excluded(file_rel_path, exclusion_patterns):
+                    continue
+                if file_types is None or any(file.endswith(ext) for ext in file_types):
+                    file_path = os.path.join(root, file)
+                    
+                    print(f"Processing: {file_rel_path}")
+                    out_file.write(f"File: {file_rel_path}\n")
+                    out_file.write("-" * 50 + "\n")
+                    
+                    try:
+                        with open(file_path, 'r', encoding='utf-8') as in_file:
+                            content = in_file.read()
+                            out_file.write(f"Content of {file_rel_path}:\n")
+                            out_file.write(content)
+                    except Exception as e:
+                        print(f"Error reading file {file_rel_path}: {str(e)}. Skipping.")
+                        out_file.write(f"Error reading file: {str(e)}. Content skipped.\n")
+                    
+                    out_file.write("\n\n")
+
+def main(args: List[str]) -> None:
+    if len(args) < 3:
+        print("Usage: python script.py <start_path> <output_file> [exclusion_file] [file_extensions...]")
+        print("Both exclusion_file and file_extensions are optional.")
+        sys.exit(1)
+
+    start_path: str = args[1]
+    output_file: str = args[2]
+    exclusion_file: Optional[str] = None
+    file_types: Optional[List[str]] = None
+
+    if len(args) > 3:
+        if not args[3].startswith('.'):
+            exclusion_file = args[3]
+            file_types = args[4:] if len(args) > 4 else None
+        else:
+            file_types = args[3:]
+
+    exclusion_patterns = parse_exclusion_file(exclusion_file) if exclusion_file else set()
+    
+    if exclusion_file:
+        print(f"Using exclusion patterns from {exclusion_file}: {exclusion_patterns}")
+    else:
+        print("No exclusion file specified. Scanning all files.")
+
+    if file_types:
+        print(f"Scanning for file types: {file_types}")
+    else:
+        print("No file types specified. Scanning all files.")
+
+    scan_folder(start_path, file_types, output_file, exclusion_patterns)
+    print(f"Scan complete. Results written to {output_file}")
+
+if __name__ == "__main__":
+    main(sys.argv)
+
+File: opportunitiesAndFinalReturns/opportunitiesAndFinalReturns.js
+--------------------------------------------------
+Content of opportunitiesAndFinalReturns/opportunitiesAndFinalReturns.js:
+import NodeCache from 'node-cache';
+import { CONFIG } from '../config.js';
+import { getVWAPs } from '../VWAP/VWAP.js';
+import { addTMNSymbols } from '../utils/addTMNSymbols.js';
+
+const cache = new NodeCache({ stdTTL: 600 });
+
+export function findArbitrageOpportunities(allPrices) {
+  const { minMarginPercent, fees } = CONFIG;
+
+  const opportunities = new Array(1000); // Preallocate space for opportunities
+  let opportunityCount = 0;
+
+  const exchanges = Object.keys(allPrices);
+  const exchangeCount = exchanges.length;
+
+  const feeMultipliers = new Map(
+    exchanges.map(exchange => [
+      exchange,
+      {
+        buy: 1 + fees[exchange].taker,
+        sell: 1 - fees[exchange].taker,
+      },
+    ]),
+  );
+
+  for (let i = 0; i < exchangeCount - 1; i++) {
+    const exchangeA = exchanges[i];
+    const dataA = allPrices[exchangeA];
+
+    for (let j = i + 1; j < exchangeCount; j++) {
+      const exchangeB = exchanges[j];
+      const dataB = allPrices[exchangeB];
+
+      // Generate a unique cache key
+      const cacheKey = `${exchangeA}-${exchangeB}`;
+
+      // Retrieve or compute common bases
+      let commonSymbols = cache.get(cacheKey);
+      if (!commonSymbols) {
+        const symbolA = new Set(Object.keys(dataA));
+        const symbolB = new Set(Object.keys(dataB));
+        commonSymbols = [...symbolA].filter(symbol => symbolB.has(symbol)); // Intersection
+        cache.set(cacheKey, commonSymbols); // Cache the result
+      }
+
+      for (const symbol of commonSymbols) {
+        const priceA = dataA[symbol];
+        const priceB = dataB[symbol];
+
+        // Get fee multipliers
+        const feesA = feeMultipliers.get(exchangeA);
+        const feesB = feeMultipliers.get(exchangeB);
+
+        // Calculate prices with fees
+        const buyPriceA = priceA.ask * feesA.buy;
+        const sellPriceA = priceA.bid * feesA.sell;
+        const buyPriceB = priceB.ask * feesB.buy;
+        const sellPriceB = priceB.bid * feesB.sell;
+
+        // Calculate margins and check arbitrage opportunities
+        if (buyPriceA < sellPriceB) {
+          const marginAB = ((sellPriceB - buyPriceA) / sellPriceB) * 100;
+          if (marginAB >= minMarginPercent) {
+            opportunities[opportunityCount++] = {
+              symbol,
+              buyExchange: exchangeA,
+              sellExchange: exchangeB,
+              buyPrice: buyPriceA,
+              sellPrice: sellPriceB,
+              margin: marginAB,
+            };
+          }
+        } else if (buyPriceB < sellPriceA) {
+          const marginBA = ((sellPriceA - buyPriceB) / sellPriceA) * 100;
+          if (marginBA >= minMarginPercent) {
+            opportunities[opportunityCount++] = {
+              symbol,
+              buyExchange: exchangeB,
+              sellExchange: exchangeA,
+              buyPrice: buyPriceB,
+              sellPrice: sellPriceA,
+              margin: marginBA,
+            };
+          }
+        }
+      }
+    }
+  }
+
+  return opportunities
+    .slice(0, opportunityCount)
+    .sort((a, b) => b.margin - a.margin);
+}
+
+export async function calculateFinalReturns(
+  opportunities,
+  exchanges,
+  USDTPrice,
+  returnType = 'low', // enum: [undefined, 'slip', 'spread']]
+) {
+  const { fees, leverage, minVolumeUSD, slippage } = CONFIG;
+
+  const tradeVolumeUSD = minVolumeUSD * leverage;
+
+  const symbolsAndSidesByExchange = {};
+
+  for (const opportunity of opportunities) {
+    const { symbol, buyExchange, sellExchange } = opportunity;
+
+    // Process buy side
+    if (!symbolsAndSidesByExchange[buyExchange]) {
+      symbolsAndSidesByExchange[buyExchange] = {};
+    }
+    if (!symbolsAndSidesByExchange[buyExchange][symbol]) {
+      symbolsAndSidesByExchange[buyExchange][symbol] = new Set();
+    }
+    symbolsAndSidesByExchange[buyExchange][symbol].add('buy');
+
+    // Process sell side
+    if (!symbolsAndSidesByExchange[sellExchange]) {
+      symbolsAndSidesByExchange[sellExchange] = {};
+    }
+    if (!symbolsAndSidesByExchange[sellExchange][symbol]) {
+      symbolsAndSidesByExchange[sellExchange][symbol] = new Set();
+    }
+    symbolsAndSidesByExchange[sellExchange][symbol].add('sell');
+  }
+
+  // Fetch VWAPs for exchanges
+  const vwapResultsByExchange = {};
+
+  await Promise.all(
+    Object.entries(symbolsAndSidesByExchange).map(
+      async ([exchangeId, symbolsAndSides]) => {
+        const vwapResults = await getVWAPs(
+          exchanges,
+          exchangeId,
+          symbolsAndSides,
+          tradeVolumeUSD,
+          USDTPrice,
+        );
+        vwapResultsByExchange[exchangeId] = vwapResults;
+      },
+    ),
+  );
+  console.log('COMPLETE: Order books fetched\n');
+  addTMNSymbols(vwapResultsByExchange, USDTPrice);
+
+  const finalReturns = [];
+
+  for (const opportunity of opportunities) {
+    const { symbol, buyExchange, sellExchange } = opportunity;
+
+    const spreadBuyExchange =
+      vwapResultsByExchange[buyExchange][symbol]?.spread;
+    const spreadSellExchange =
+      vwapResultsByExchange[sellExchange][symbol]?.spread;
+
+    const buyVWAP = vwapResultsByExchange[buyExchange][symbol]?.asks;
+    const sellVWAP = vwapResultsByExchange[sellExchange][symbol]?.bids;
+    if (!buyVWAP || !sellVWAP) continue;
+    const buyFee = fees[buyExchange].taker;
+    const sellFee = fees[sellExchange].taker;
+
+    const netBuyPrice = buyVWAP * (1 + buyFee);
+    const netSellPrice = sellVWAP * (1 - sellFee);
+
+    const profit = netSellPrice - netBuyPrice;
+
+    const returnPercentage = (profit / netSellPrice) * 100;
+
+    const netSellPriceWithSlippage = netSellPrice * (1 - slippage);
+    const netBuyPriceWithSlippage = netBuyPrice * (1 + slippage);
+    const profitWithSlippage =
+      netSellPriceWithSlippage - netBuyPriceWithSlippage;
+    const returnPercentageWithSlippage =
+      (profitWithSlippage / netSellPriceWithSlippage) * 100;
+
+    const netSellPriceWithSlippageAndSpread =
+      netSellPriceWithSlippage - spreadBuyExchange;
+    const netBuyPriceWithSlippageAndSpread =
+      netBuyPriceWithSlippage + spreadSellExchange;
+    const profitWithSlippageAndSpread =
+      netSellPriceWithSlippageAndSpread - netBuyPriceWithSlippageAndSpread;
+    const returnPercentageWithSlippageAndSpread =
+      (profitWithSlippageAndSpread / netSellPriceWithSlippageAndSpread) * 100;
+
+    let selectedBuyPrice;
+    let selectedSellPrice;
+    switch (returnType) {
+      case 'slip':
+        selectedBuyPrice = netBuyPriceWithSlippage;
+        selectedSellPrice = netSellPriceWithSlippage;
+
+      case 'spread':
+        selectedBuyPrice = netBuyPriceWithSlippageAndSpread;
+        selectedSellPrice = netSellPriceWithSlippageAndSpread;
+
+      default:
+        selectedBuyPrice = netBuyPrice;
+        selectedSellPrice = netSellPrice;
+    }
+
+    const selectedReturnPercentage =
+      ((selectedSellPrice - selectedBuyPrice) / selectedSellPrice) * 100;
+
+    finalReturns.push({
+      opportunity,
+      symbol,
+      buyExchange,
+      sellExchange,
+      selectedBuyPrice,
+      selectedSellPrice,
+      selectedReturnPercentage,
+      netBuyPrice,
+      netSellPrice,
+      returnPercentage,
+      netBuyPriceWithSlippage,
+      netSellPriceWithSlippage,
+      returnPercentageWithSlippage,
+      netBuyPriceWithSlippageAndSpread,
+      netSellPriceWithSlippageAndSpread,
+      returnPercentageWithSlippageAndSpread,
+      tradeVolumeUSD,
+      USDTPrice,
+    });
+  }
+
+  return finalReturns;
+}
+
+
+File: close/closePosition.js
+--------------------------------------------------
+Content of close/closePosition.js:
+//! It ,ust be read and reviewd based on create order completely
+
+// Close Open Positions
+export async function closePosition(position) {
+  const { symbol, buyExchange, sellExchange, amount } = position;
+
+  console.log(
+    `Closing position for ${symbol} on ${buyExchange} and ${sellExchange}`,
+  );
+
+  // Close Buy Position (Sell)
+  try {
+    if (exchanges[buyExchange]) {
+      await exchanges[buyExchange].createMarketSellOrder(symbol, amount);
+    } else {
+      console.log(`Custom order closing needed for ${buyExchange}`);
+      // Implement custom order closing for Nobitex or Wallex
+    }
+  } catch (error) {
+    console.error(`Error closing position on ${buyExchange}:`, error.message);
+  }
+
+  // Close Sell Position (Buy)
+  try {
+    if (exchanges[sellExchange]) {
+      await exchanges[sellExchange].createMarketBuyOrder(symbol, amount);
+    } else {
+      console.log(`Custom order closing needed for ${sellExchange}`);
+      // Implement custom order closing for Nobitex or Wallex
+    }
+  } catch (error) {
+    console.error(`Error closing position on ${sellExchange}:`, error.message);
+  }
+
+  console.log(`Position for ${symbol} closed.`);
+}
+
+
+File: orderCreation/orderCreationHelpers.js
+--------------------------------------------------
+Content of orderCreation/orderCreationHelpers.js:
+import readline from 'readline';
+
+// Function to retry order placement
+export async function retryOrderCreation(
+  exchanges,
+  exchangeId,
+  symbol,
+  side,
+  amount,
+  price,
+  maxRetries = 10,
+  interval = 500,
+) {
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      console.log(
+        `Attempt ${
+          i + 1
+        }/${maxRetries} to place ${side} order on ${exchangeId}`,
+      );
+      const order = await exchanges[exchangeId].createOrder(
+        symbol,
+        'market',
+        side,
+        amount,
+        price,
+      );
+      console.log(`${side} order on ${exchangeId} successful.`);
+      return order; // Success
+    } catch (error) {
+      console.error(
+        `Failed to place ${side} order on ${exchangeId}: ${error.message}`,
+      );
+      if (i < maxRetries - 1) {
+        await new Promise(resolve => setTimeout(resolve, interval)); // Wait before retrying
+      }
+    }
+  }
+  return null; // Failure after retries
+}
+
+// Function to prompt the user
+export function promptUser(question, defaultResponse = 'no') {
+  return new Promise(resolve => {
+    const rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout,
+    });
+    rl.question(
+      `${question} (yes/no) [default: ${defaultResponse}] `,
+      answer => {
+        rl.close();
+        resolve(answer.toLowerCase() === 'yes' ? true : false);
+      },
+    );
+  });
+}
+
+export async function handleFailedOrders({
+  buyOrder,
+  sellOrder,
+  buyExchange,
+  sellExchange,
+  symbol,
+  amountToTrade,
+}) {
+  if (!buyOrder || !sellOrder) {
+    const failedSide = !buyOrder ? 'buy' : 'sell';
+    const failedExchange = !buyOrder ? buyExchange : sellExchange;
+    const successSide = buyOrder ? 'buy' : 'sell';
+    const successOrder = buyOrder || sellOrder;
+    const successExchange = buyOrder ? buyExchange : sellExchange;
+
+    console.log(`Retrying failed ${failedSide} order on ${failedExchange}...`);
+    const retryOrder = await retryOrderCreation(
+      failedExchange,
+      symbol,
+      failedSide,
+      amountToTrade,
+      null, // Assuming price is null for market orders
+    );
+
+    if (!retryOrder) {
+      const shouldContinue = await promptUser(
+        `Failed to place ${failedSide} order on ${failedExchange} after retries. Continue trying?`,
+        'no',
+      );
+
+      if (!shouldContinue) {
+        console.log(`Closing ${successSide} position on ${successExchange}...`);
+        await closePosition(successOrder); // Close successful order
+        console.log(`${successSide} position closed.`);
+      }
+    }
+  }
+}
+
+
+File: orderCreation/orderCreation.js
+--------------------------------------------------
+Content of orderCreation/orderCreation.js:
+import { storeOpenPosition } from '../utils/storeOpenPositions.js';
+import { handleFailedOrders } from './orderCreationHelpers.js';
+import { createExchangeOrder } from './orderExchangeCreation.js';
+
+// Main function
+export async function createOrder(exchanges, order, type = 'market') {
+  const {
+    symbol,
+    buyExchange,
+    sellExchange,
+    selectedBuyPrice,
+    selectedSellPrice,
+    USDTPrice,
+  } = order;
+
+  //! MUST be fixed!
+  const amountToTrade = order.tradeVolumeUSD / order.netBuyPrice;
+
+  console.log(
+    `Placing orders: Buy ${amountToTrade.toFixed(
+      6,
+    )} ${symbol} on ${buyExchange}, Sell on ${sellExchange}`,
+  );
+
+  let buyOrder, sellOrder;
+
+  try {
+    const [buyResult, sellResult] = await Promise.all([
+      createExchangeOrder(
+        buyExchange,
+        symbol,
+        type,
+        'buy',
+        amountToTrade,
+        selectedBuyPrice,
+        exchanges,
+        USDTPrice,
+      ),
+      createExchangeOrder(
+        sellExchange,
+        symbol,
+        'sell',
+        amountToTrade,
+        selectedSellPrice,
+        exchanges,
+        USDTPrice,
+      ),
+    ]);
+
+    buyOrder = buyResult;
+    sellOrder = sellResult;
+
+    console.log(`Buy order on ${buyExchange} successful.`);
+    console.log(`Sell order on ${sellExchange} successful.`);
+  } catch (error) {
+    console.error(`Error placing orders: ${error.message}`);
+  }
+
+  // Handle failed orders
+  await handleFailedOrders({
+    buyOrder,
+    sellOrder,
+    buyExchange,
+    sellExchange,
+    symbol,
+    amountToTrade,
+  });
+
+  // Store Open Position if successful
+  if (buyOrder && sellOrder) {
+    storeOpenPosition({
+      symbol,
+      buyExchange,
+      sellExchange,
+      amount: amountToTrade,
+      entryBuyPrice: buyOrder.average,
+      entrySellPrice: sellOrder.average,
+    });
+  }
+}
+
+
+File: orderCreation/orderExchangeCreation.js
+--------------------------------------------------
+Content of orderCreation/orderExchangeCreation.js:
+import axios from 'axios';
+import { CONFIG } from '../config.js';
+
+export async function createExchangeOrder(
+  exchangeId,
+  symbol,
+  type,
+  side,
+  amount,
+  price,
+  exchanges,
+  USDTPrice,
+) {
+  switch (exchangeId) {
+    case 'nobitex':
+      return createNobitexOrder(symbol, type, side, amount, price);
+
+    case 'wallex':
+      return createWallexOrder(symbol, type, side, amount, price);
+
+    default:
+      let convertedValues;
+      if (symbol.endsWith('/TMN')) {
+        convertedValues = convertTMNOrderToUSDT(symbol, price, USDTPrice);
+      }
+      const convertedSymbol = convertedValues?.convertedSymbol || symbol;
+      const convertedPrice = convertedValues?.convertedPrice || price;
+
+      return exchanges[exchangeId].createOrder(
+        convertedSymbol,
+        type,
+        side,
+        amount,
+        convertedPrice,
+      );
+  }
+}
+
+const { exchangeParams } = CONFIG;
+const apiKey = exchangeParams.nobitex.apiKey;
+
+async function createNobitexOrder(symbol, type, side, amount, price) {
+  // Nobitex expects the symbol in a specific format (e.g., 'BTCIRT')
+  const [base, quote] = symbol.split('/');
+
+  let {
+    transformedBase: nobitexBase,
+    transformedAmount: nobitexAmount,
+    transformedPrice: nobitexPrice,
+  } = originalizeSpecialCoinOrder('nobitex', base, amount, price);
+  const url = 'https://api.nobitex.ir/market/orders/add';
+  const headers = {
+    Authorization: `Token ${apiKey}`,
+    'Content-Type': 'application/json',
+    UserAgent: `TraderBot/19977`,
+  };
+  const dstCurrency = quote === 'TMN' ? 'rls' : 'usdt';
+  let srcCurrency = nobitexBase.toLowerCase();
+  nobitexPrice = quote === 'TMN' ? nobitexPrice / 10 : nobitexPrice;
+
+  let body = {
+    type: side,
+    execution: type,
+    srcCurrency,
+    dstCurrency,
+    amount: nobitexAmount.toString(),
+    price: nobitexPrice.toString(),
+  };
+
+  try {
+    const response = await axios.post(url, body, { headers });
+    if (response.data.status === 'failed') {
+      throw new Error(
+        `Nobitex order creation failed: ${JSON.stringify(response.data)}`,
+      );
+    }
+    console.log(
+      `Nobitex order created successfully: ${JSON.stringify(response.data)}`,
+    );
+    return response.data;
+  } catch (error) {
+    console.error(
+      `Error creating Nobitex order: ${
+        error.response ? JSON.stringify(error.response.data) : error.message
+      }`,
+    );
+    throw error;
+  }
+}
+
+async function createWallexOrder(symbol, type, side, amount, price) {
+  const { exchangeParams } = CONFIG;
+  const apiKey = exchangeParams.wallex.apiKey;
+
+  const [base, quote] = symbol.split('/');
+
+  let {
+    transformedBase: wallexBase,
+    transformedAmount: wallexAmount,
+    transformedPrice: wallexPrice,
+  } = originalizeSpecialCoinOrder('wallex', base, amount, price);
+
+  // Wallex expects the symbol in a specific format (e.g., 'BTCUSDT')
+  const wallexSymbol = wallexBase + '/' + quote;
+
+  const url = 'https://api.wallex.ir/v1/order/create';
+  const timestamp = Date.now();
+
+  const body = {
+    symbol: wallexSymbol,
+    type,
+    side,
+    quantity: wallexAmount.toString(),
+    price: wallexPrice.toString(),
+    timestamp,
+  };
+
+  const headers = {
+    'x-api-key': apiKey,
+    'Content-Type': 'application/json',
+  };
+
+  try {
+    const response = await axios.post(url, body, { headers });
+
+    if (response.data.code !== 201 && response.data.code !== 200) {
+      throw new Error(
+        `Wallex order creation failed: ${JSON.stringify(response.data)}`,
+      );
+    }
+
+    console.log(
+      `Wallex order created successfully: ${JSON.stringify(response.data)}`,
+    );
+    return response.data;
+  } catch (error) {
+    console.error(
+      `Error creating Wallex order: ${
+        error.response ? JSON.stringify(error.response.data) : error.message
+      }`,
+    );
+    throw error;
+  }
+}
+
+function convertTMNOrderToUSDT(symbol, price, USDTPrice) {
+  const convertedSymbol = symbol.replace('/TMN', '/USDT');
+  const convertedPrice = price / USDTPrice;
+  return { convertedSymbol, convertedPrice };
+}
+
+
+File: utils/addTMNSymbols.js
+--------------------------------------------------
+Content of utils/addTMNSymbols.js:
+import { CONFIG } from '../config.js';
+import { splitSymbolsIntoQuoteAndBase } from './splitSymbols.js';
+
+export function addTMNSymbols(VWAPsByExchange, USDTPrice) {
+  const { customExchanges } = CONFIG;
+  for (const exchangeId in VWAPsByExchange) {
+    if (customExchanges.includes(exchangeId)) continue;
+
+    const quotesMap = splitSymbolsIntoQuoteAndBase(null, exchangeId);
+
+    if (quotesMap.USDT?.length) {
+      for (const symbol in VWAPsByExchange[exchangeId]) {
+        let TMNSymbol = symbol.replace('/USDT', '/TMN');
+        VWAPsByExchange[exchangeId][TMNSymbol] = {};
+        VWAPsByExchange[exchangeId][TMNSymbol].asks =
+          VWAPsByExchange[exchangeId][symbol].asks * USDTPrice;
+        VWAPsByExchange[exchangeId][TMNSymbol].bids =
+          VWAPsByExchange[exchangeId][symbol].bids * USDTPrice;
+        VWAPsByExchange[exchangeId][TMNSymbol].spread =
+          VWAPsByExchange[exchangeId][symbol].spread * USDTPrice;
+      }
+    }
+  }
+  return;
+}
+
+
+File: utils/splitSymbols.js
+--------------------------------------------------
+Content of utils/splitSymbols.js:
+import NodeCache from 'node-cache';
+
+const baseCache = new NodeCache({
+  stdTTL: 600, // cache expires after 10 minute
+});
+const quoteCache = new NodeCache({
+  stdTTL: 600, // cache expires after 10 minute
+});
+
+export function splitSymbolsIntoBaseAndQuote(symbols, exchangeId) {
+  const key = exchangeId;
+  const cachedValue = baseCache.get(key);
+  if (cachedValue) {
+    return cachedValue;
+  }
+
+  const basesMap = {};
+  for (const symbol of symbols) {
+    const [base, quote] = symbol.split('/');
+    if (!basesMap[base]) {
+      basesMap[base] = [];
+    }
+    basesMap[base].push(symbol);
+  }
+
+  baseCache.set(key, basesMap);
+  return basesMap;
+}
+
+export function splitSymbolsIntoQuoteAndBase(
+  symbols,
+  exchangeId,
+  recalculate = false,
+) {
+  const key = exchangeId;
+  const cachedValue = quoteCache.get(key);
+  if (cachedValue && !recalculate) {
+    return cachedValue;
+  }
+
+  const quotesMap = {};
+  for (const symbol in symbols) {
+    const [base, quote] = symbol.split('/');
+    if (!quotesMap[quote]) {
+      quotesMap[quote] = [];
+    }
+    quotesMap[quote].push(symbol);
+  }
+
+  quoteCache.set(key, quotesMap);
+  return quotesMap;
+}
+
+
+File: utils/calculateTMNPrice.js
+--------------------------------------------------
+Content of utils/calculateTMNPrice.js:
+import { CONFIG } from '../config.js';
+import { splitSymbolsIntoQuoteAndBase } from './splitSymbols.js';
+
+export function calculateTMNPrice(allPrices, USDTPrice) {
+  const { customExchanges = [] } = CONFIG;
+  for (const exchange in allPrices) {
+    if (customExchanges.includes(exchange)) continue;
+
+    const symbols = allPrices[exchange];
+
+    const quotesMap = splitSymbolsIntoQuoteAndBase(symbols, exchange);
+    if (quotesMap.USDT?.length) {
+      for (const symbol of quotesMap['USDT']) {
+        let TMNSymbol = symbol.replace('/USDT', '/TMN');
+        symbols[TMNSymbol] = {};
+        symbols[TMNSymbol].ask = symbols[symbol].ask * USDTPrice;
+        symbols[TMNSymbol].bid = symbols[symbol].bid * USDTPrice;
+      }
+      if (!quotesMap.hasOwnProperty('TMN')) {
+        splitSymbolsIntoQuoteAndBase(symbols, exchange, true);
+      }
+    }
+  }
+}
+
+
+File: utils/storeOpenPositions.js
+--------------------------------------------------
+Content of utils/storeOpenPositions.js:
+export function storeOpenPosition({
+  symbol,
+  buyExchange,
+  sellExchange,
+  amount,
+  entryBuyPrice,
+  entrySellPrice,
+}) {
+  openPositions.push({
+    symbol,
+    buyExchange,
+    sellExchange,
+    amount,
+    entryBuyPrice,
+    entrySellPrice,
+    timestamp: Date.now(),
+  });
+  console.log('Open position stored.');
+}
+
+
+File: VWAP/VWAP.js
+--------------------------------------------------
+Content of VWAP/VWAP.js:
+import { fetchOrderBooks } from '../fetch/fetchOrderBooks.js';
+
+export async function getVWAPs(
+  exchanges,
+  exchangeId,
+  symbolsAndSides,
+  tradeVolumeUSD,
+  USDTPrice,
+) {
+  try {
+    const symbols = Object.keys(symbolsAndSides);
+    const orderBooks = await fetchOrderBooks(exchanges, exchangeId, symbols);
+
+    const VWAPs = calculateVWAPs(orderBooks, tradeVolumeUSD, USDTPrice);
+
+    return VWAPs;
+  } catch (error) {
+    console.error(`Error fetching VWAPs for ${exchangeId}:`, error.message);
+    return {};
+  }
+}
+
+// Calculate Volume Weighted Average Price (VWAP)
+export function calculateVWAPs(orderBooks, tradeVolumeUSD, USDTPrice) {
+  let VWAPs = {};
+  let tradeVolume = {
+    USDT: tradeVolumeUSD,
+    TMN: tradeVolumeUSD * USDTPrice,
+  };
+  for (let symbol in orderBooks) {
+    VWAPs[symbol] = {};
+    let [_, quote] = symbol.split('/');
+    let orderBook = orderBooks[symbol];
+
+    for (let side of ['asks', 'bids']) {
+      let accumulatedVolume = 0;
+      let accumulatedCost = 0;
+      let orders = orderBook[side];
+      for (const [price, amount] of orders) {
+        const orderCost = price * amount;
+        if (accumulatedCost + orderCost >= tradeVolume[quote]) {
+          const remainingCost = tradeVolume[quote] - accumulatedCost;
+          const partialAmount = remainingCost / price;
+          accumulatedVolume += partialAmount;
+          accumulatedCost += remainingCost;
+          VWAPs[symbol][side] = accumulatedCost / accumulatedVolume;
+          break;
+        } else {
+          accumulatedVolume += amount;
+          accumulatedCost += orderCost;
+        }
+      }
+    }
+    VWAPs[symbol].spread = VWAPs[symbol]?.asks - VWAPs[symbol]?.bids;
+  }
+  return VWAPs;
+}
+
+
+File: fetch/fetchOrderBooks.js
+--------------------------------------------------
+Content of fetch/fetchOrderBooks.js:
+import axios from 'axios';
+import {
+  standardizeNobitexOrderBooks,
+  standardizeWallexOrderBooks,
+} from '../transforms/standardizations.js';
+import { splitSymbolsIntoQuoteAndBase } from '../utils/splitSymbols.js';
+
+// Fetch Nobitex L2 Order Books
+export async function fetchNobitexOrderBooks(symbols) {
+  try {
+    const response = await axios.get('https://api.nobitex.ir/v2/orderbook/all');
+    const data = response.data;
+
+    if (!data) {
+      throw new Error('No order book data available from Nobitex');
+    }
+
+    delete data.status;
+
+    const nobitexOrderBooks = standardizeNobitexOrderBooks(data, symbols);
+
+    console.log('Nobitex order books fetched');
+    return nobitexOrderBooks;
+  } catch (error) {
+    console.error('Error fetching Nobitex order books:', error);
+    return {};
+  }
+}
+
+// Fetch Wallex L2 Order Books
+//! It must skip the pairs which are not in the initial opportuninities
+//! Special coins must be taken into account
+export async function fetchWallexOrderBooks(symbols) {
+  try {
+    const response = await axios.get('https://api.wallex.ir/v2/depth/all');
+    const data = response.data.result;
+
+    if (!data) {
+      throw new Error('No order book data available from Wallex');
+    }
+    const wallexOrderBooks = standardizeWallexOrderBooks(data, symbols);
+
+    console.log('Wallex order books fetched');
+    return wallexOrderBooks;
+  } catch (error) {
+    console.error('Error fetching Wallex order books:', error.message);
+    return {};
+  }
+}
+
+export async function fetchOrderBooks(exchanges, exchangeId, symbols) {
+  try {
+    const orderBooks = {};
+    const quotesMap = splitSymbolsIntoQuoteAndBase(symbols, exchangeId);
+    if (exchangeId === 'nobitex') {
+      const nobitexOrderBooks = await fetchNobitexOrderBooks(symbols);
+      Object.assign(orderBooks, nobitexOrderBooks);
+    } else if (exchangeId === 'wallex') {
+      const wallexOrderBooks = await fetchWallexOrderBooks(symbols);
+      Object.assign(orderBooks, wallexOrderBooks);
+    } else {
+      // For CCXT exchanges
+      if (exchanges[exchangeId].has.fetchOrderBooks) {
+        const exchangeOrderBooks = await exchanges[exchangeId].fetchOrderBooks(
+          symbols,
+        );
+        Object.assign(orderBooks, exchangeOrderBooks);
+      } else {
+        await Promise.allSettled(
+          symbols
+            .filter(symbol => !quotesMap.TMN.includes(symbol))
+            .map(async symbol => {
+              const orderBook = await exchanges[exchangeId].fetchOrderBook(
+                symbol,
+              );
+              orderBooks[symbol] = orderBook;
+            }),
+        );
+      }
+
+      console.log(
+        `${exchangeId.charAt(0).toUpperCase()}${exchangeId.slice(
+          1,
+        )} order books fetched`,
+      );
+    }
+
+    return orderBooks;
+  } catch (error) {
+    console.error(`Error fetching VWAPs for ${exchangeId}:`, error.message);
+    return {};
+  }
+}
+
+
+File: fetch/fetchPrices.js
+--------------------------------------------------
+Content of fetch/fetchPrices.js:
+import ccxt from 'ccxt';
+import axios from 'axios';
+import { CONFIG } from '../config.js';
+
+// Function to fetch prices from Nobitex (custom implementation)
+export async function fetchNobitexPrices() {
+  const { coinsToConsider, coinsToIgnore } = CONFIG;
+  try {
+    const response = await axios.get('https://api.nobitex.ir/v2/orderbook/all');
+    const data = response.data;
+    delete data.status;
+    const prices = {};
+
+    for (const symbol in data) {
+      let base = symbol.replace(/(IRT|USDT)$/, '');
+      let quote = symbol.replace(new RegExp(`^${base}`), '');
+
+      if (
+        (coinsToConsider && !coinsToConsider.includes(base)) ||
+        coinsToIgnore.includes(base)
+      ) {
+        continue;
+      }
+      // Asks and Bids are opposite to other exchanges
+      const bids = data[symbol].asks;
+      const asks = data[symbol].bids;
+
+      if (bids?.length > 0 && asks?.length > 0) {
+        let bidPrice = parseFloat(bids[0][0]);
+        let askPrice = parseFloat(asks[0][0]);
+
+        if (quote === 'IRT') {
+          bidPrice /= 10;
+          askPrice /= 10;
+          quote = 'TMN';
+        }
+
+        prices[base + '/' + quote] = {
+          bid: bidPrice,
+          ask: askPrice,
+        };
+      }
+    }
+
+    console.log('Nobitex prices fetched');
+    return prices;
+  } catch (error) {
+    console.error('Error fetching Nobitex prices:', error);
+    return {};
+  }
+}
+
+// Function to fetch prices from Wallex (custom implementation)
+export async function fetchWallexPrices() {
+  const { coinsToConsider, coinsToIgnore } = CONFIG;
+  try {
+    const response = await axios.get('https://api.wallex.ir/v1/markets');
+    const symbols = response.data.result.symbols;
+
+    const prices = {};
+
+    for (const symbol in symbols) {
+      const ticker = symbols[symbol];
+      const base = ticker.baseAsset;
+      const quote = ticker.quoteAsset;
+
+      if (
+        (coinsToConsider && !coinsToConsider.includes(base)) ||
+        coinsToIgnore.includes(base)
+      ) {
+        continue;
+      }
+
+      const bidPrice = parseFloat(ticker.stats.bidPrice);
+      const askPrice = parseFloat(ticker.stats.askPrice);
+
+      prices[base + '/' + quote] = {
+        bid: bidPrice,
+        ask: askPrice,
+      };
+    }
+
+    console.log('Wallex prices fetched');
+    return prices;
+  } catch (error) {
+    console.error('Error fetching Wallex prices:', error.message);
+    return {};
+  }
+}
+
+// Function to fetch all prices concurrently
+export async function fetchAllPrices(exchanges) {
+  const { exchangesToUse } = CONFIG;
+  const allPrices = {};
+  const fetchPromises = exchangesToUse.map(async exchangeId => {
+    if (exchangeId === 'nobitex') {
+      allPrices[exchangeId] = await fetchNobitexPrices();
+    } else if (exchangeId === 'wallex') {
+      allPrices[exchangeId] = await fetchWallexPrices();
+    } else {
+      allPrices[exchangeId] = await fetchPrices(exchanges, exchangeId);
+    }
+  });
+
+  await Promise.all(fetchPromises);
+  return allPrices;
+}
+
+// Function to fetch prices from an exchange
+export async function fetchPrices(exchanges, exchangeId) {
+  const { coinsToConsider, coinsToIgnore } = CONFIG;
+  try {
+    const exchange = exchanges[exchangeId];
+    await exchange.loadMarkets();
+    const tickers = await exchange.fetchTickers();
+    const prices = {};
+
+    for (const symbol in tickers) {
+      const ticker = tickers[symbol];
+      const [base, quote] = symbol.split('/');
+
+      if (
+        (coinsToConsider && !coinsToConsider.includes(base)) ||
+        coinsToIgnore.includes(base)
+      ) {
+        continue;
+      }
+
+      //! make sure to check the ticker of each exchange, because
+      //! sometimes bid and ask are not available.
+      prices[symbol] = {
+        bid: ticker.bid || ticker.close,
+        ask: ticker.ask || ticker.close,
+      };
+    }
+
+    console.log(
+      `${exchangeId.charAt(0).toUpperCase()}${exchangeId.slice(
+        1,
+      )} prices fetched`,
+    );
+    return prices;
+  } catch (error) {
+    console.error(`Error fetching prices from ${exchangeId}:`, error.message);
+    return {};
+  }
+}
+
+
+File: transforms/originalizations.js
+--------------------------------------------------
+Content of transforms/originalizations.js:
+export function originalizeSpecialCoinOrder(exchangeId, base, amount, price) {
+  const { specialCoinStandardizations } = CONFIG;
+
+  const standardizations = specialCoinStandardizations[exchangeId];
+  const standardization = standardizations.filter(s => s.standardBase === base);
+
+  const { originalBase, correctionFactor } = standardization;
+
+  const transformedBase = originalBase;
+  const transformedAmount = amount * correctionFactor;
+  const transformedPrice = price / correctionFactor;
+
+  const transformedValues = {
+    transformedBase,
+    transformedAmount,
+    transformedPrice,
+  };
+
+  return transformedValues;
+}
+
+
+File: transforms/standardizations.js
+--------------------------------------------------
+Content of transforms/standardizations.js:
+import { CONFIG } from '../config.js';
+import { splitSymbolsIntoBaseAndQuote } from '../utils/splitSymbols.js';
+
+export function standardizeNobitexOrderBooks(nobitexOrderBooks, symbols) {
+  const orderBooks = {};
+  for (let symbol in nobitexOrderBooks) {
+    const base = symbol.replace(/(IRT|USDT)$/, '');
+    let quote = symbol.replace(new RegExp(`^${base}`), '');
+
+    const factor = quote === 'IRT' ? 10 : 1;
+    if (quote === 'IRT') {
+      quote = 'TMN';
+    }
+
+    const standardizedSymbol = base + '/' + quote;
+
+    if (!symbols.includes(standardizedSymbol)) continue;
+
+    const asks = nobitexOrderBooks[symbol].bids.map(([price, amount]) => [
+      parseFloat(price) / factor,
+      parseFloat(amount),
+    ]);
+    const bids = nobitexOrderBooks[symbol].asks.map(([price, amount]) => [
+      parseFloat(price) / factor,
+      parseFloat(amount),
+    ]);
+
+    orderBooks[standardizedSymbol] = {
+      asks,
+      bids,
+    };
+  }
+
+  standardizeSpecialCoinOrderBooks('nobitex', orderBooks);
+  return orderBooks;
+}
+export function standardizeWallexOrderBooks(wallexOrderBooks, symbols) {
+  const orderBooks = {};
+
+  for (const symbol in wallexOrderBooks) {
+    const orderBook = wallexOrderBooks[symbol];
+
+    const base = symbol.replace(/(TMN|USDT)$/, '');
+    let quote = symbol.replace(new RegExp(`^${base}`), '');
+
+    const standardizedSymbol = base + '/' + quote;
+
+    if (!symbols.includes(standardizedSymbol)) continue;
+
+    const asks = orderBook.ask
+      .slice(0, 24)
+      .map(order => [parseFloat(order.price), parseFloat(order.quantity)]);
+    const bids = orderBook.bid
+      .slice(0, 24)
+      .map(order => [parseFloat(order.price), parseFloat(order.quantity)]);
+
+    orderBooks[standardizedSymbol] = {
+      asks,
+      bids,
+    };
+  }
+
+  standardizeSpecialCoinOrderBooks('wallex', orderBooks);
+  return orderBooks;
+}
+
+export function standardizeSpecialCoinOrderBooks(exchangeId, orderBooks) {
+  const { specialCoinStandardizations } = CONFIG;
+
+  const standardizations = specialCoinStandardizations[exchangeId];
+  const symbols = Object.keys(orderBooks);
+  const basesMap = splitSymbolsIntoBaseAndQuote(symbols, exchangeId);
+
+  for (let i = 0; i < standardizations.length; i++) {
+    const { originalBase, standardBase, correctionFactor } =
+      standardizations[i];
+
+    for (const originalSymbol of basesMap[originalBase]) {
+      if (!orderBooks[originalSymbol]) continue;
+      const { bids, asks } = orderBooks[originalSymbol];
+      const standardSymbol = originalSymbol.replace(originalBase, standardBase);
+
+      orderBooks[standardSymbol] = {
+        bids: bids.map(bid => bid * correctionFactor),
+        asks: asks.map(ask => ask * correctionFactor),
+      };
+
+      delete orderBooks[originalSymbol];
+    }
+  }
+}
+
+export function standardizeSpecialCoinPrices(allPrices) {
+  const { specialCoinStandardizations } = CONFIG;
+  for (const exchangeId in specialCoinStandardizations) {
+    const standardizations = specialCoinStandardizations[exchangeId];
+
+    const symbols = Object.keys(allPrices[exchangeId]);
+    const basesMap = splitSymbolsIntoBaseAndQuote(symbols, exchangeId);
+
+    for (let i = 0; i < standardizations.length; i++) {
+      const { originalBase, standardBase, correctionFactor } =
+        standardizations[i];
+      if (allPrices[exchangeId] && basesMap[originalBase]) {
+        const priceData = allPrices[exchangeId];
+
+        for (const originalSymbol of basesMap[originalBase]) {
+          const { bid, ask } = priceData[originalSymbol];
+          const standardSymbol = originalSymbol.replace(
+            originalBase,
+            standardBase,
+          );
+          allPrices[exchangeId][standardSymbol] = {
+            bid: bid * correctionFactor,
+            ask: ask * correctionFactor,
+          };
+          delete allPrices[exchangeId][originalSymbol];
+        }
+      }
+    }
+  }
+}
+
+
+File: monitoring/monitoring.js
+--------------------------------------------------
+Content of monitoring/monitoring.js:
+import NodeCache from 'node-cache';
+import { getVWAPs } from '../VWAP/VWAP.js';
+const cache = new NodeCache({ stdTTL: 600 });
+// Monitor Open Positions
+export async function monitorOpenPositions(exchanges) {
+  const key = 'openPositions';
+  const openPositions = [];
+  const cachedOpenPositions = cache.get(key);
+  if (cachedOpenPositions) {
+    openPositions = cachedOpenPositions;
+  } else {
+    openPositions = fetchOpenPositions(exchanges);
+    cache.set('openPositions', openPositions);
+  }
+
+  for (const position of openPositions.slice()) {
+    const {
+      symbol,
+      buyExchange,
+      sellExchange,
+      amount,
+      entryBuyPrice,
+      entrySellPrice,
+    } = position;
+
+    const tradeVolumeUSD = amount * entryBuyPrice;
+
+    const [currentBuyVWAP, currentSellVWAP] = await Promise.all([
+      getVWAPs(buyExchange, symbol, tradeVolumeUSD, 'sell'),
+      getVWAPs(sellExchange, symbol, tradeVolumeUSD, 'buy'),
+    ]);
+
+    if (!currentBuyVWAP || !currentSellVWAP) {
+      continue;
+    }
+
+    const buyFee = CONFIG.fees[buyExchange].taker;
+    const sellFee = CONFIG.fees[sellExchange].taker;
+
+    const netCurrentBuyPrice = currentBuyVWAP * (1 - buyFee);
+    const netCurrentSellPrice = currentSellVWAP * (1 + sellFee);
+
+    const profit = (netCurrentSellPrice - netCurrentBuyPrice) * amount;
+    const returnPercentage = (profit / (entryBuyPrice * amount)) * 100;
+
+    console.log(
+      `Position ${coin}/${quote} on ${buyExchange}/${sellExchange}: Return ${returnPercentage.toFixed(
+        2,
+      )}%`,
+    );
+
+    // Exit conditions
+    if (
+      returnPercentage >= CONFIG.minMarginPercent * 2 ||
+      returnPercentage <= -CONFIG.minMarginPercent
+    ) {
+      await closePosition(position);
+      openPositions.splice(openPositions.indexOf(position), 1);
+    }
+  }
+}
+
+

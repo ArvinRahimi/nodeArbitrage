@@ -6,7 +6,7 @@ import { CONFIG } from '../config.js';
 export async function fetchNobitexPrices() {
   const { coinsToConsider, coinsToIgnore } = CONFIG;
   try {
-    const response = await axios.get('https://api.nobitex.ir/v2/orderbook/all');
+    const response = await axios.get('https://api.nobitex.ir/v3/orderbook/all');
     const data = response.data;
     delete data.status;
     const prices = {};

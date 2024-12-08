@@ -3,18 +3,28 @@ import { handleFailedOrders } from './orderCreationHelpers.js';
 import { createExchangeOrder } from './orderExchangeCreation.js';
 
 // Main function
-export async function createOrder(exchanges, order, type = 'market') {
+export async function createOrder(
+  exchanges,
+  order,
+  type = 'limit',
+  isClose = false,
+) {
   const {
     symbol,
     buyExchange,
     sellExchange,
     selectedBuyPrice,
     selectedSellPrice,
+    tradeVolumeUSDT,
+    netBuyPrice,
+    netSellPrice,
     USDTPrice,
   } = order;
 
-  //! MUST be fixed!
-  const amountToTrade = order.tradeVolumeUSD / order.netBuyPrice;
+  const amountToTrade = {
+    USDT: tradeVolumeUSDT / ((netBuyPrice + netSellPrice) / 2),
+    TMN: tradeVolumeUSDT / ((netBuyPrice + netSellPrice) / 2),
+  };
 
   console.log(
     `Placing orders: Buy ${amountToTrade.toFixed(
@@ -67,7 +77,7 @@ export async function createOrder(exchanges, order, type = 'market') {
   });
 
   // Store Open Position if successful
-  if (buyOrder && sellOrder) {
+  if (buyOrder && sellOrder && !isClose) {
     storeOpenPosition({
       symbol,
       buyExchange,

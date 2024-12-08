@@ -8,7 +8,7 @@ import { splitSymbolsIntoQuoteAndBase } from '../utils/splitSymbols.js';
 // Fetch Nobitex L2 Order Books
 export async function fetchNobitexOrderBooks(symbols) {
   try {
-    const response = await axios.get('https://api.nobitex.ir/v2/orderbook/all');
+    const response = await axios.get('https://api.nobitex.ir/v3/orderbook/all');
     const data = response.data;
 
     if (!data) {
@@ -19,7 +19,7 @@ export async function fetchNobitexOrderBooks(symbols) {
 
     const nobitexOrderBooks = standardizeNobitexOrderBooks(data, symbols);
 
-    console.log('Nobitex order books fetched and standardized');
+    console.log('Nobitex order books fetched');
     return nobitexOrderBooks;
   } catch (error) {
     console.error('Error fetching Nobitex order books:', error);
@@ -66,7 +66,7 @@ export async function fetchOrderBooks(exchanges, exchangeId, symbols) {
         );
         Object.assign(orderBooks, exchangeOrderBooks);
       } else {
-        await Promise.all(
+        await Promise.allSettled(
           symbols
             .filter(symbol => !quotesMap.TMN.includes(symbol))
             .map(async symbol => {

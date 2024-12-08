@@ -1,36 +1,91 @@
-//! It ,ust be read and reviewd based on create order completely
+import { createOrder } from '../orderCreation/orderCreation.js';
+import {
+  moveToClosedPositions,
+  updateOpenPosition,
+} from '../utils/database.js';
 
-// Close Open Positions
-export async function closePosition(position) {
-  const { symbol, buyExchange, sellExchange, amount } = position;
-
+export async function closePosition(
+  exchanges,
+  {
+    id,
+    symbol,
+    buyExchange,
+    sellExchange,
+    amount,
+    selectedBuyPrice,
+    selectedSellPrice,
+    tradeVolumeUSDT,
+    USDTPrice,
+  },
+  type,
+) {
   console.log(
-    `Closing position for ${symbol} on ${buyExchange} and ${sellExchange}`,
+    `Initiating position closure for ${symbol} on ${buyExchange}/${sellExchange}`,
   );
 
-  // Close Buy Position (Sell)
   try {
-    if (exchanges[buyExchange]) {
-      await exchanges[buyExchange].createMarketSellOrder(symbol, amount);
-    } else {
-      console.log(`Custom order closing needed for ${buyExchange}`);
-      // Implement custom order closing for Nobitex or Wallex
-    }
-  } catch (error) {
-    console.error(`Error closing position on ${buyExchange}:`, error.message);
-  }
+    await updateOpenPosition(id, { status: 'closing' });
 
-  // Close Sell Position (Buy)
-  try {
-    if (exchanges[sellExchange]) {
-      await exchanges[sellExchange].createMarketBuyOrder(symbol, amount);
-    } else {
-      console.log(`Custom order closing needed for ${sellExchange}`);
-      // Implement custom order closing for Nobitex or Wallex
-    }
-  } catch (error) {
-    console.error(`Error closing position on ${sellExchange}:`, error.message);
-  }
+    const closingOrderResult = await createOrder(
+      exchanges,
+      {
+        symbol,
+        buyExchange: sellExchange,
+        sellExchange: buyExchange,
+        selectedBuyPrice: selectedBuyPrice,
+        selectedSellPrice: selectedSellPrice,
+        tradeVolumeUSDT,
+        netBuyPrice,
+        netSellPrice,
+        USDTPrice,
+        amount,
+      },
+      type,
+      true,
+    );
 
-  console.log(`Position for ${symbol} closed.`);
+    if (!closingOrderResult) {
+      throw new Error('Failed to execute closing orders');
+    }
+
+    await moveToClosedPositions(id, {
+      closeBuyPrice: selectedBuyPrice,
+      closeSellPrice: selectedSellPrice,
+    });
+
+    const closeTime = new Date().toISOString();
+    console.log(
+      `Successfully closed position for ${symbol}:`,
+      `\n- Buy Exchange: ${buyExchange}`,
+      `\n- Sell Exchange: ${sellExchange}`,
+      `\n- Amount: ${amount}`,
+      `\n- Close Time: ${closeTime}`,
+    );
+
+    return {
+      success: true,
+      closeTime,
+      closingOrders: closingOrderResult,
+      message: 'Position closed successfully',
+    };
+  } catch (error) {
+    await updateOpenPosition(id, { status: 'open' });
+
+    console.error(
+      `Failed to close position for ${symbol} on ${buyExchange}/${sellExchange}:`,
+      error.message,
+    );
+
+    throw {
+      success: false,
+      error: error.message,
+      details: {
+        symbol,
+        buyExchange,
+        sellExchange,
+        amount,
+        failureTime: new Date().toISOString(),
+      },
+    };
+  }
 }

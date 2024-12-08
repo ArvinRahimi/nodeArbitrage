@@ -14,8 +14,16 @@ import { createOrder } from './orderCreation/orderCreation.js';
 import { monitorOpenPositions } from './monitoring/monitoring.js';
 
 dotenv.config();
-const { exchangesToUse, exchangeParams, customExchanges, minMarginPercent } =
-  CONFIG;
+
+const {
+  exchangesToUse,
+  exchangeParams,
+  customExchanges,
+  minMarginPercent,
+  returnTypeOnOpen,
+  orderTypeOnOpen,
+  refreshIntervalMs,
+} = CONFIG;
 // Initialize exchanges
 const exchanges = {};
 
@@ -28,7 +36,7 @@ for (const id of exchangesToUse) {
       options: exchangeParams[id]?.options,
       enableRateLimit: true,
     });
-  } else if (!CONFIG.customExchanges.includes(id)) {
+  } else if (!customExchanges.includes(id)) {
     throw new Error(`Unsupported exchange: ${id}`);
   }
 }
@@ -41,7 +49,7 @@ async function main() {
     try {
       const allPrices = await fetchAllPrices(exchanges);
 
-      console.log('COMPLETE: Price fetching!');
+      console.log('COMPLETE: Price fetching\n');
 
       const nobitexUSDTPrice =
         (allPrices.nobitex['USDT/TMN'].ask +
@@ -57,59 +65,58 @@ async function main() {
 
       const opportunities = findArbitrageOpportunities(allPrices);
 
-      const finalReturns = await calculateFinalReturns(
+      let finalReturns = await calculateFinalReturns(
         opportunities,
         exchanges,
         USDTPrice,
+        returnTypeOnOpen,
       );
 
-      finalReturns
+      finalReturns = finalReturns
         .filter(
-          finalReturns =>
-            finalReturns.returnPercentageWithSlippageAndSpread >
-            minMarginPercent,
+          fr =>
+            fr.selectedReturnPercentage > minMarginPercent &&
+            fr.selectedReturnPercentage < 4,
         )
         .sort(
-          (a, b) =>
-            b.returnPercentageWithSlippageAndSpread -
-            a.returnPercentageWithSlippageAndSpread,
+          (a, b) => b.selectedReturnPercentage - a.selectedReturnPercentage,
         );
 
       if (finalReturns?.length) {
-        let order = finalReturns[0];
+        const order = finalReturns[0];
 
-        await createOrder(exchanges, order);
+        console.log('hi');
+        //await createOrder(exchanges, order, orderTypeOnOpen);
       }
 
-      /* for (const finalReturn of finalReturns) {
+      if (!finalReturns?.length) {
+        console.log('No profitable position available!');
+      }
+
+      for (const finalReturn of finalReturns.slice(0, 3)) {
         console.log(
           `Position: Long ${finalReturn.symbol} on ${
             finalReturn.buyExchange
-          } at ${finalReturn.netBuyPriceWithSlippageAndSpread.toFixed(
-            6,
-          )}, Short on ${
+          } at ${finalReturn.selectedBuyPrice.toFixed(6)}, Short on ${
             finalReturn.sellExchange
-          } at ${finalReturn.netSellPriceWithSlippageAndSpread.toFixed(
+          } at ${finalReturn.selectedSellPrice.toFixed(
             6,
-          )}, Expected Return: ${finalReturn.returnPercentageWithSlippageAndSpread.toFixed(
+          )}, Expected Return: ${finalReturn.selectedReturnPercentage.toFixed(
             2,
           )}%`,
         );
-      } */
+      }
 
       // Monitor open positions
-      //await monitorOpenPositions();
-
+      //await monitorOpenPositions(exchanges, USDTPrice);
+      console.log('-----------------------------\n\n');
+      if (finalReturns?.length) break;
       // Wait before next iteration
-      await new Promise(resolve =>
-        setTimeout(resolve, CONFIG.refreshIntervalMs),
-      );
+      await new Promise(resolve => setTimeout(resolve, refreshIntervalMs));
     } catch (error) {
       console.error('An error occurred:', error.message);
       // Wait before next iteration in case of error
-      await new Promise(resolve =>
-        setTimeout(resolve, CONFIG.refreshIntervalMs),
-      );
+      await new Promise(resolve => setTimeout(resolve, refreshIntervalMs));
     }
   }
 }

@@ -16,6 +16,8 @@ export function addTMNSymbols(VWAPsByExchange, USDTPrice) {
           VWAPsByExchange[exchangeId][symbol].asks * USDTPrice;
         VWAPsByExchange[exchangeId][TMNSymbol].bids =
           VWAPsByExchange[exchangeId][symbol].bids * USDTPrice;
+        VWAPsByExchange[exchangeId][TMNSymbol].spread =
+          VWAPsByExchange[exchangeId][symbol].spread * USDTPrice;
       }
     }
   }

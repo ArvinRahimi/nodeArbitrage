@@ -1,11 +1,16 @@
 // Configuration
 export const CONFIG = {
-  minMarginPercent: 0.3, // Minimum margin percentage to consider
-  minVolumeUSD: 200, // Minimum trade volume in USD
+  minMarginPercent: 0.5, // Minimum margin percentage to consider
+  minVolumeUSD: 10, // Minimum trade volume in USDT
+  returnTypeOnOpen: 'spread', // enum: [null, 'slip', 'spread']]
+  returnTypeOnClose: null, // enum: [null, 'slip']
+  closeMinMarginPercent: 0.4,
+  orderTypeOnOpen: 'limit',
+  orderTypeOnClose: 'limit',
   leverage: 1, // Leverage for positions
-  refreshIntervalMs: 3000, // Interval to refresh data in milliseconds
+  refreshIntervalMs: 10000, // Interval to refresh data in milliseconds
   fees: {
-    coinex: { maker: 0.001, taker: 0.001 },
+    coinex: { maker: 0.0015, taker: 0.0015 },
     nobitex: { maker: 0.0015, taker: 0.0015 },
     wallex: { maker: 0.001, taker: 0.001 },
   },
@@ -13,7 +18,7 @@ export const CONFIG = {
   exchangesToUse: ['coinex', 'nobitex', 'wallex'],
   customExchanges: ['nobitex', 'wallex'],
   coinsToConsider: null, // null means all coins
-  coinsToIgnore: ['OMG', 'X'],
+  coinsToIgnore: ['OMG', 'X', 'BCH'],
   specialCoinStandardizations: {
     nobitex: [
       {
@@ -60,7 +65,7 @@ export const CONFIG = {
       apiKey: process.env.COINEX_API_KEY,
       secret: process.env.COINEX_SECRET_KEY,
       options: {
-        defaultType: 'spot',
+        defaultType: 'future',
       },
     },
     nobitex: {
@@ -72,4 +77,7 @@ export const CONFIG = {
       secret: process.env.WALLEX_SECRET_KEY,
     },
   },
+  databaseName: './open_positions.db',
+  orderTypeOnClose: 'limit', // 'market' or 'limit' - determines the order type used when closing positions
+  limitOrderPriceMargin: 0.001, // 0.1% - The margin to add/subtract from the top bid/ask when placing limit orders
 };

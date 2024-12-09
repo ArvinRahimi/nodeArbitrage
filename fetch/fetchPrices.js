@@ -22,8 +22,8 @@ export async function fetchNobitexPrices() {
         continue;
       }
       // Asks and Bids are opposite to other exchanges
-      const bids = data[symbol].asks;
-      const asks = data[symbol].bids;
+      const bids = data[symbol].bids;
+      const asks = data[symbol].asks;
 
       if (bids?.length > 0 && asks?.length > 0) {
         let bidPrice = parseFloat(bids[0][0]);

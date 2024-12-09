@@ -11,13 +11,28 @@ export async function createExchangeOrder(
   price,
   exchanges,
   USDTPrice,
+  pricePrecision,
 ) {
   switch (exchangeId) {
     case 'nobitex':
-      return createNobitexOrder(symbol, type, side, amount, price);
+      return createNobitexOrder(
+        symbol,
+        type,
+        side,
+        amount,
+        price,
+        pricePrecision,
+      );
 
     case 'wallex':
-      return createWallexOrder(symbol, type, side, amount, price);
+      return createWallexOrder(
+        symbol,
+        type,
+        side,
+        amount,
+        price,
+        pricePrecision,
+      );
 
     default:
       let convertedValues;
@@ -37,10 +52,17 @@ export async function createExchangeOrder(
   }
 }
 
-const { exchangeParams } = CONFIG;
-const apiKey = exchangeParams.nobitex.apiKey;
+async function createNobitexOrder(
+  symbol,
+  type,
+  side,
+  amount,
+  price,
+  priceDecimals,
+) {
+  const { exchangeParams } = CONFIG;
+  const apiKey = exchangeParams.nobitex.apiKey;
 
-async function createNobitexOrder(symbol, type, side, amount, price) {
   // Nobitex expects the symbol in a specific format (e.g., 'BTCIRT')
   const [base, quote] = symbol.split('/');
 
@@ -66,7 +88,7 @@ async function createNobitexOrder(symbol, type, side, amount, price) {
     srcCurrency,
     dstCurrency,
     amount: nobitexAmount.toString(),
-    price: nobitexPrice.toString(),
+    price: nobitexPrice.toFixed(priceDecimals),
   };
 
   try {
@@ -90,7 +112,14 @@ async function createNobitexOrder(symbol, type, side, amount, price) {
   }
 }
 
-async function createWallexOrder(symbol, type, side, amount, price) {
+async function createWallexOrder(
+  symbol,
+  type,
+  side,
+  amount,
+  price,
+  priceDecimals,
+) {
   const { exchangeParams } = CONFIG;
   const apiKey = exchangeParams.wallex.apiKey;
 
@@ -113,7 +142,7 @@ async function createWallexOrder(symbol, type, side, amount, price) {
     type,
     side,
     quantity: wallexAmount.toString(),
-    price: wallexPrice.toString(),
+    price: wallexPrice.toFixed(priceDecimals),
     timestamp,
   };
 

@@ -23,6 +23,7 @@ const {
   returnTypeOnOpen,
   orderTypeOnOpen,
   refreshIntervalMs,
+  testMode = true,
 } = CONFIG;
 // Initialize exchanges
 const exchanges = {};
@@ -36,6 +37,9 @@ for (const id of exchangesToUse) {
       options: exchangeParams[id]?.options,
       enableRateLimit: true,
     });
+    if (testMode) {
+      exchanges[id].setSandboxMode(true);
+    }
   } else if (!customExchanges.includes(id)) {
     throw new Error(`Unsupported exchange: ${id}`);
   }
@@ -53,10 +57,11 @@ async function main() {
         (allPrices.nobitex['USDT/TMN'].ask +
           allPrices.nobitex['USDT/TMN'].bid) /
         2;
-      const wallexUSDTPrice =
+      /* const wallexUSDTPrice =
         (allPrices.wallex['USDT/TMN'].ask + allPrices.wallex['USDT/TMN'].bid) /
-        2;
-      const USDTPrice = (nobitexUSDTPrice + wallexUSDTPrice) / 2;
+        2; 
+      const USDTPrice = Math.floor((nobitexUSDTPrice + wallexUSDTPrice) / 2);*/
+      const USDTPrice = Math.floor(nobitexUSDTPrice);
 
       standardizeSpecialCoinPrices(allPrices);
       calculateTMNPrice(allPrices, USDTPrice);
@@ -73,7 +78,7 @@ async function main() {
       finalReturns = finalReturns
         .filter(
           fr =>
-            fr.selectedReturnPercentage > minMarginPercent &&
+            fr.selectedReturnPercentage > minMarginPercent - 1 &&
             fr.selectedReturnPercentage < 4,
         )
         .sort(
@@ -83,7 +88,6 @@ async function main() {
       if (finalReturns?.length) {
         const order = finalReturns[0];
 
-        console.log('hi');
         await createOrder(exchanges, order, orderTypeOnOpen);
       }
 

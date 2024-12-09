@@ -1,6 +1,7 @@
 // Configuration
 export const CONFIG = {
-  minMarginPercent: 0.5, // Minimum margin percentage to consider
+  testMode: true,
+  minMarginPercent: -0.2, // Minimum margin percentage to consider
   minVolumeUSD: 10, // Minimum trade volume in USDT
   returnTypeOnOpen: 'spread', // enum: [null, 'slip', 'spread']
   returnTypeOnClose: null, // enum: [null, 'slip']
@@ -15,7 +16,7 @@ export const CONFIG = {
     wallex: { maker: 0.001, taker: 0.001 },
   },
   slippage: 0.0005,
-  exchangesToUse: ['coinex', 'nobitex', 'wallex'],
+  exchangesToUse: ['nobitex', 'wallex'],
   customExchanges: ['nobitex', 'wallex'],
   coinsToConsider: null, // null means all coins
   coinsToIgnore: ['OMG', 'X', 'BCH'],
@@ -78,6 +79,4 @@ export const CONFIG = {
     },
   },
   databaseName: './open_positions.db',
-  orderTypeOnClose: 'limit', // 'market' or 'limit' - determines the order type used when closing positions
-  limitOrderPriceMargin: 0.001, // 0.1% - The margin to add/subtract from the top bid/ask when placing limit orders
 };

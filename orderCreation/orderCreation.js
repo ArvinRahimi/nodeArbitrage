@@ -1,3 +1,4 @@
+import { findLargestPriceAndAmounPrecisions } from '../precisions/precisions.js';
 import { storeOpenPosition } from '../utils/storeOpenPositions.js';
 import { createExchangeOrder } from './orderExchangeCreation.js';
 
@@ -20,9 +21,17 @@ export async function createOrder(
     USDTPrice,
   } = order;
 
+  const { pricePrecision, amountPrecision } =
+    findLargestPriceAndAmounPrecisions(symbol);
+
+  const priceDecimals = Math.floor(Math.log10(pricePrecision));
+
+  const USDTAmount = tradeVolumeUSDT / ((netBuyPrice + netSellPrice) / 2);
+  const roundedUSDTAmount =
+    Math.floor(USDTAmount / amountPrecision) * minAmount;
   const amountToTrade = {
-    USDT: tradeVolumeUSDT / ((netBuyPrice + netSellPrice) / 2),
-    TMN: (tradeVolumeUSDT * USDTPrice) / ((netBuyPrice + netSellPrice) / 2),
+    USDT: roundedUSDTAmount,
+    TMN: roundedUSDTAmount * USDTPrice,
   };
 
   console.log(
@@ -43,6 +52,7 @@ export async function createOrder(
       selectedBuyPrice,
       exchanges,
       USDTPrice,
+      priceDecimals,
     ),
     createExchangeOrder(
       sellExchange,
@@ -53,6 +63,7 @@ export async function createOrder(
       selectedSellPrice,
       exchanges,
       USDTPrice,
+      priceDecimals,
     ),
   ]);
 

@@ -25,15 +25,14 @@ export async function closePosition(
 
   try {
     await updateOpenPosition(id, { status: 'closing' });
-    //! check prices both selected and net
     const closingOrderResult = await createOrder(
       exchanges,
       {
         symbol,
         buyExchange: sellExchange,
         sellExchange: buyExchange,
-        selectedBuyPrice: selectedBuyPrice,
-        selectedSellPrice: selectedSellPrice,
+        selectedBuyPrice,
+        selectedSellPrice,
         tradeVolumeUSDT,
         netBuyPrice,
         netSellPrice,

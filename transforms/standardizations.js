@@ -16,11 +16,11 @@ export function standardizeNobitexOrderBooks(nobitexOrderBooks, symbols) {
 
     if (!symbols.includes(standardizedSymbol)) continue;
 
-    const asks = nobitexOrderBooks[symbol].bids.map(([price, amount]) => [
+    const asks = nobitexOrderBooks[symbol].asks.map(([price, amount]) => [
       parseFloat(price) / factor,
       parseFloat(amount),
     ]);
-    const bids = nobitexOrderBooks[symbol].asks.map(([price, amount]) => [
+    const bids = nobitexOrderBooks[symbol].bids.map(([price, amount]) => [
       parseFloat(price) / factor,
       parseFloat(amount),
     ]);
@@ -117,6 +117,41 @@ export function standardizeSpecialCoinPrices(allPrices) {
           delete allPrices[exchangeId][originalSymbol];
         }
       }
+    }
+  }
+}
+
+export function standardizeSpecialCoinPrecisions(exchangeId, precisions) {
+  const { specialCoinStandardizations } = CONFIG;
+  const standardizations = specialCoinStandardizations[exchangeId];
+
+  const symbols = Object.keys(precisions.pricePrecisions);
+  const skipCaching = true;
+  const basesMap = splitSymbolsIntoBaseAndQuote(
+    symbols,
+    exchangeId,
+    skipCaching,
+  );
+
+  for (let i = 0; i < standardizations.length; i++) {
+    const { originalBase, standardBase, correctionFactor } =
+      standardizations[i];
+
+    for (const originalSymbol of basesMap[originalBase]) {
+      const pricePrecision = precisions.pricePrecisions[originalSymbol];
+      const standardSymbol = originalSymbol.replace(originalBase, standardBase);
+      precisions.pricePrecisions[standardSymbol] = pricePrecision;
+
+      delete precisions.pricePrecisions[originalSymbol];
+    }
+
+    for (const originalSymbol of basesMap[originalBase]) {
+      const amountPrecision = precisions.amountPrecisions[originalSymbol];
+      const standardSymbol = originalSymbol.replace(originalBase, standardBase);
+      precisions.amountPrecisions[standardSymbol] =
+        amountPrecision * correctionFactor;
+
+      delete precisions.amountPrecisions[originalSymbol];
     }
   }
 }

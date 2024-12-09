@@ -7,7 +7,7 @@ const quoteCache = new NodeCache({
   stdTTL: 600, // cache expires after 10 minute
 });
 
-export function splitSymbolsIntoBaseAndQuote(symbols, exchangeId) {
+export function splitSymbolsIntoBaseAndQuote(symbols, exchangeId, skipCaching) {
   const key = exchangeId;
   const cachedValue = baseCache.get(key);
   if (cachedValue) {
@@ -22,8 +22,7 @@ export function splitSymbolsIntoBaseAndQuote(symbols, exchangeId) {
     }
     basesMap[base].push(symbol);
   }
-
-  baseCache.set(key, basesMap);
+  if (!skipCaching) baseCache.set(key, basesMap);
   return basesMap;
 }
 

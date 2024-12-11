@@ -1,6 +1,10 @@
-import ccxt from 'ccxt';
+import dotenv from 'dotenv';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
-for (const ex of ccxt.exchanges) {
-  let e = new ccxt[ex]();
-  if (e.features) console.log(`${ex}:  ${e.features.future.inverse.sandbox}`);
-}
+dotenv.config({ path: import.meta.dirname + './.env' });
+
+console.log(process.env.SECRET_KEY);
+const __filename = fileURLToPath(import.meta.url);
+console.log(path.dirname(__filename));
+console.log(import.meta);

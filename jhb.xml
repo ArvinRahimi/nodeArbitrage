@@ -1,3 +1,16 @@
+<prompt>
+
+<goal>
+We are working on a Node.js program to take advantage of arbitrage opportunities between cryptocurrency exchanges. The program relies on CCXT to interface with most exchanges, and we need to integrate support for two custom exchanges.
+</goal>
+
+<context>
+1. Our codebase uses CCXT extensively, and all integrations must align with its architecture and design principles.
+2. We have already implemented some parts of the program, which are shared below for your reference.
+3. Your task is to expand the functionality by defining these two custom exchanges using CCXT's extensibility features.
+</context>
+
+<codebase>
 Directory Structure:
 -------------------
 / 
@@ -2181,5 +2194,570 @@ const processPositionsConcurrently = async (
     }
   });
 };
+</codebase>
 
+<nobitex_doc_cheatsheet>
+Nobitex API Documentation Cheatsheet
+
+This cheatsheet provides a quick reference guide to the Nobitex cryptocurrency exchange API.
+
+Authentication
+- Authorization: Token yourTOKENhereHEX0000000000
+- All non-public APIs require a token sent in the Authorization header.
+- Obtain your token from your Nobitex profile settings.
+- Recommended method: Get token directly from the user panel.
+- Automated token retrieval: Use the /auth/login API if necessary (requires handling security measures like 2FA and CAPTCHA).
+- User Agent: Set the UserAgent header to TraderBot/XXXXX for better bot identification.
+
+General Considerations
+- Rate Limits: Each API has specific rate limits mentioned in its documentation.
+- Error Handling: Implement proper error handling to manage unexpected situations and responses.
+- API Changes: Regularly check for API updates and deprecated features.
+- Troubleshooting: Ensure your code adheres to the documentation and use common debugging techniques.
+
+Public Market Data
+1. Order Book
+   - GET /v3/orderbook/SYMBOL
+   - Rate Limit: 300 requests/minute
+   - Retrieves the order book for a specific market.
+   - Parameters:
+     - SYMBOL (string, required): Market symbol (e.g., BTCIRT, ETHUSDT).
+   - Response:
+     ```json
+     {
+         "status": "ok",
+         "lastUpdate": 1644991756704,
+         "lastTradePrice": "35650565900",
+         "asks": [
+             ["1476091000", "1.016"],
+             ["1479700000", "0.2561"]
+         ],
+         "bids": [
+             ["1470001120", "0.126571"],
+             ["1470000000", "0.818994"]
+         ]
+     }
+     ```
+   - Get all order books:
+     - GET /v3/orderbook/all
+   - Deprecated order book (use v3 instead)
+     - GET /v2/orderbook/SYMBOL
+
+2. Depth Chart (Experimental)
+   - GET /v2/depth/SYMBOL
+   - Rate Limit: 300 requests/minute
+   - Retrieves depth chart data for a specific market.
+   - Parameters:
+     - SYMBOL (string, required): Market symbol (e.g., BTCIRT).
+
+3. Trades
+   - GET /v2/trades/SYMBOL
+   - Rate Limit: 60 requests/minute
+   - Retrieves the list of recent trades for a specific market.
+   - Parameters:
+     - symbol (string, required): Market symbol (e.g., BTCIRT).
+
+4. Market Statistics
+   - GET /market/stats
+   - Rate Limit: 20 requests/minute
+   - Retrieves overall market statistics or filtered by source/destination currency.
+   - Parameters:
+     - srcCurrency (string, optional): Source currency (e.g., btc).
+     - dstCurrency (string, optional): Destination currency (e.g., rls).
+
+5. OHLC Statistics
+   - GET /market/udf/history
+   - Retrieves OHLC (Open, High, Low, Close) candlestick data.
+   - Parameters:
+     - symbol (string, required): Market symbol.
+     - resolution (string, required): Timeframe per candle (e.g., 1, 5, 15, 30, 60, 180, 240, 360, 720, D, 2D, 3D).
+     - to (int, required): End time (Unix timestamp in seconds).
+     - from (int, optional): Start time (Unix timestamp in seconds).
+     - countback (int, optional): Number of candles before the end time.
+     - page (int, optional): Page number (default: 1).
+
+6. Global Market Statistics
+   - POST /market/global-stats
+   - Rate Limit: 100 requests/10 minutes
+   - Retrieves statistics from global markets (Kraken and Binance).
+
+User Data
+1. User Profile
+   - GET /users/profile
+   - Retrieves user profile information, bank cards, bank accounts, verification status, profile settings, and trade statistics.
+
+2. Generate Blockchain Address
+   - POST /users/wallets/generate-address
+   - Rate Limit: 30 requests/hour
+   - Generates a new blockchain address for a specific currency.
+   - Parameters:
+     - currency (string, required): Cryptocurrency (e.g., btc).
+
+3. Add Bank Card
+   - POST /users/cards-add
+   - Rate Limit: 30 requests/30 minutes
+   - Adds a new bank card to the user's profile.
+   - Parameters:
+     - number (string, required): Card number.
+     - bank (string, required): Bank name.
+
+4. Add Bank Account
+   - POST /users/accounts-add
+   - Rate Limit: 30 requests/30 minutes
+   - Adds a new bank account to the user's profile.
+   - Parameters:
+     - number (string, required): Account number.
+     - shaba (string, required): IBAN number.
+     - bank (string, required): Bank name.
+
+5. User Limitations
+   - GET /users/limitations
+   - Retrieves the user's limitations on withdrawals, deposits, and trades based on their verification level.
+
+6. Wallet List
+   - GET /users/wallets/list
+   - Rate Limit: 20 requests/2 minutes
+   - Retrieves a list of the user's wallets.
+
+7. Selected Wallet List
+   - GET /v2/wallets
+   - Rate Limit: 15 requests/minute
+   - Parameters:
+     - currencies (string, optional): Comma-separated list of currencies (e.g., rls,btc).
+     - type (string, optional): Wallet type ('spot' or 'margin', default: 'spot').
+   - Retrieves a list of user's wallets for selected currencies.
+
+8. Wallet Balance
+   - POST /users/wallets/balance
+   - Rate Limit: 60 requests/2 minutes
+   - Retrieves the balance of a specific wallet.
+   - Parameters:
+     - currency (string, required): Currency (e.g., ltc).
+
+9. Transactions List
+   - GET /users/wallets/transactions/list
+   - Rate Limit: 60 requests/2 minutes
+   - Retrieves a list of transactions for a specific wallet.
+   - Parameters:
+     - wallet (int, required): Wallet ID.
+
+10. Deposits List
+    - GET /users/wallets/deposits/list
+    - Rate Limit: 60 requests/2 minutes
+    - Retrieves a list of deposits for a specific wallet.
+    - Parameters:
+      - wallet (string, required): Wallet ID.
+
+11. Favorite Markets
+    - GET /users/markets/favorite: Retrieves the user's favorite markets.
+    - POST /users/markets/favorite: Adds markets to the user's favorite list.
+      - Parameters:
+        - market (string, required): Comma-separated list of market symbols.
+    - DELETE /users/markets/favorite: Removes a market from the user's favorite list or removes all.
+      - Parameters:
+         - market (string, required): Market symbol or "All".
+
+Spot Market Trading
+1. Add Order
+   - POST /market/orders/add
+   - Rate Limit: 300 requests/10 minutes (shared limit)
+   - Places a new order on the spot market.
+   - Parameters:
+     - type (string, required): Order type ('buy' or 'sell').
+     - execution (string, required): Execution type ('limit', 'market', 'stop_market', 'stop_limit').
+     - srcCurrency (string, required): Source currency.
+     - dstCurrency (string, required): Destination currency.
+     - amount (monetary, required): Order amount.
+     - price (monetary, required): Order price (not required for market orders if you set price range).
+     - stopPrice (monetary, required for stop orders): Stop price.
+     - mode (string, required for OCO orders): 'oco'.
+     - stopLimitPrice (monetary, required for OCO orders): Limit price for the stop-limit order in OCO.
+     - clientOrderId (string, optional): Client-assigned order ID (up to 32 characters, unique among open/active/inactive orders).
+   - Response:
+        ```json
+        {
+        "status": "ok",
+        "order": {
+            "type": "sell",
+            "srcCurrency": "Bitcoin",
+            "dstCurrency": "ریال",
+            "price": "520000000",
+            "amount": "0.6",
+            "totalPrice": "312000000.0",
+            "matchedAmount": 0,
+            "unmatchedAmount": "0.6",
+            "id": 25,
+            "status": "Active",
+            "partial": false,
+            "fee": 0,
+            "created_at": "2018-11-28T11:36:13.592827+00:00",
+            "clientOrderId": "order1"
+        }
+        }
+        ```
+2. Order Status
+   - POST /market/orders/status
+   - Rate Limit: 300 requests/minute
+   - Retrieves the status of a specific order.
+   - Parameters:
+     - id (int, optional): Order ID.
+     - clientOrderId (string, optional): Client-assigned order ID.
+
+3. Order List
+   - GET /market/orders/list
+   - Rate Limit: 30 requests/minute
+   - Retrieves a list of the user's orders.
+   - Parameters:
+     - status (string, optional): Order status ('open', 'done', 'close', 'all').
+     - type (string, optional): Order type ('buy', 'sell').
+     - execution (string, optional): Execution type.
+     - tradeType (string, optional): Trade type ('spot', 'margin').
+     - srcCurrency (string, optional): Source currency.
+     - dstCurrency (string, optional): Destination currency.
+     - details (int, optional): Level of detail in the response (1 or 2).
+     - fromId (int, optional): Minimum order ID.
+     - order (string, optional): Sorting order ('id', 'created_at', 'price', '-id', '-created_at', '-price').
+
+4. Update Order Status
+   - POST /market/orders/update-status
+   - Rate Limit: 90 requests/minute
+   - Changes the status of an order (cancel or activate).
+   - Parameters:
+     - order (int, optional): Order ID.
+     - clientOrderId (string, optional): Client-assigned order ID.
+     - status (string, required): New status ('canceled').
+
+5. Cancel Multiple Orders
+   - POST /market/orders/cancel-old
+   - Rate Limit: 30 requests/minute
+   - Cancels multiple active orders based on specified criteria.
+   - Parameters:
+     - hours (float, optional): Cancel orders older than this number of hours.
+     - execution (string, optional): Execution type.
+     - tradeType (string, optional): Trade type.
+     - srcCurrency (string, optional): Source currency.
+     - dstCurrency (string, optional): Destination currency.
+
+6. User Trades List
+   - GET /market/trades/list
+   - Rate Limit: 30 requests/minute
+   - Retrieves a list of the user's trades within the last 3 days.
+   - Parameters:
+     - srcCurrency (string, optional): Source currency.
+     - dstCurrency (string, optional): Destination currency.
+     - fromId (int, optional): Minimum trade ID.
+
+Margin Market Trading
+1. Margin Markets List
+   - GET /margin/markets/list
+   - Retrieves a list of supported margin markets.
+
+2. Active Liquidity Pools
+   - GET /liquidity-pools/list
+   - Rate Limit: 12 requests/minute
+   - Retrieves the capacity of active liquidity pools.
+
+3. Transfer to Margin Wallet
+   - POST /wallets/transfer
+   - Rate Limit: 10 requests/minute
+   - Transfers funds between spot and margin wallets.
+   - Parameters:
+     - currency (string, required): Currency.
+     - amount (monetary, required): Amount to transfer.
+     - src (string, required): Source wallet type ('spot' or 'margin').
+     - dst (string, required): Destination wallet type ('spot' or 'margin').
+
+4. Margin Delegation Limit
+   - GET /margin/delegation-limit
+   - Rate Limit: 12 requests/minute
+   - Retrieves the user's margin delegation limit.
+   - Parameters:
+     - currency (string, required): Cryptocurrency.
+
+5. Add Margin Order
+   - POST /margin/orders/add
+   - Rate Limit: 300 requests/10 minutes
+   - Places a new order on the margin market.
+   - Parameters:
+      - execution (string, required): Execution type ('limit', 'market', 'stop_limit', 'stop_market')
+      - srcCurrency (string, required): Source currency
+      - dstCurrency (string, required): Destination currency
+      - type (string, required): Order type ('buy' or 'sell')
+      - leverage (monetary, required): Leverage
+      - amount (monetary, required): Order amount
+      - price (monetary, required): Order price
+      - stopPrice (monetary, optional): Stop price for stop orders
+      - mode (string, required for OCO orders): 'oco'
+      - stopLimitPrice (monetary, required for OCO): Stop limit price for OCO
+   - Response:
+        ```json
+        {
+          "status": "ok",
+          "order": {
+            "id": 25,
+            "type": "sell",
+            "execution": "Limit",
+            "tradeType": "Margin",
+            "srcCurrency": "btc",
+            "dstCurrency": "rls",
+            "price": "6400000000",
+            "amount": "0.01",
+            "status": "Active",
+            "totalPrice": "0",
+            "totalOrderPrice": "64000000",
+            "matchedAmount": 0,
+            "unmatchedAmount": "0.01",
+            "leverage": "2",
+            "side": "open",
+            "partial": false,
+            "fee": 0,
+            "created_at": "2022-10-20T11:36:13.592827+00:00",
+            "averagePrice": "0"
+          }
+        }
+        ```
+
+6. Positions List
+   - GET /positions/list
+   - Rate Limit: 30 requests/minute
+   - Retrieves a list of open and past positions.
+   - Parameters:
+     - srcCurrency (string, optional): Source currency.
+     - dstCurrency (string, optional): Destination currency.
+     - status (string, optional): Position status ('active' or 'past').
+
+7. Position Status
+   - GET /positions/:positionId:/status
+   - Rate Limit: 100 requests/10 minutes (shared limit)
+   - Retrieves the status of a specific position.
+   - Parameters:
+     - :positionId: (url-param, required): Position ID.
+
+8. Close Position
+   - POST /positions/:positionId:/close
+   - Rate Limit: 300 requests/10 minutes
+   - Closes a position by placing an order in the opposite direction.
+   - Parameters:
+     - :positionId: (url-param, required): Position ID.
+     - execution (string, required): Execution type.
+     - amount (monetary, required): Order amount.
+     - price (monetary, required): Order price.
+     - stopPrice (monetary, optional): Stop price for stop orders.
+     - mode (string, required for OCO): 'oco'
+     - stopLimitPrice (monetary, required for OCO): Stop limit price for OCO
+
+9. Edit Position Collateral
+   - POST /positions/:positionId:/edit-collateral
+   - Rate Limit: 60 requests/minute
+   - Modifies the collateral of an open position.
+   - Parameters:
+     - :positionId: (url-param, required): Position ID.
+     - collateral (monetary, required): New collateral amount.
+
+Withdrawals
+1. Add Withdrawal Request
+   - POST /users/wallets/withdraw
+   - Rate Limit: 10 requests/3 minutes
+   - Creates a new withdrawal request.
+   - Parameters:
+     - wallet (int, required): Wallet ID.
+     - network (string, optional): Transfer network.
+     - invoice (string, optional): Invoice (required for BTCLN).
+     - amount (monetary, optional): Amount (required without invoice).
+     - address (string, optional): Destination address (required without invoice).
+     - explanations (string, optional): Explanations.
+     - noTag (boolean, optional): No tag (default: false).
+     - tag (string, optional): Transfer tag.
+
+2. Confirm Withdrawal Request
+   - POST /users/wallets/withdraw-confirm
+   - Rate Limit: 30 requests/hour
+   - Confirms a withdrawal request.
+   - Parameters:
+     - withdraw (int, required): Withdrawal request ID.
+     - otp (int, required depending on the destination address): One-time password.
+
+3. Withdrawals List
+   - GET /users/wallets/withdraws/list
+   - Rate Limit: 60 requests/2 minutes
+   - Retrieves a list of recent withdrawals.
+   - Parameters:
+     - wallet (string, optional): Wallet ID.
+
+4. Withdrawal Status
+   - GET /withdraws/WITHDRAW
+   - Rate Limit: 60 requests/2 minutes
+   - Retrieves the status of a specific withdrawal request.
+   - Parameters:
+     - WITHDRAW (int, required): Withdrawal request ID.
+
+Websocket (Experimental)
+- URL: wss://wss.nobitex.ir/connection/websocket
+- Rate Limit: 100 connections/IP
+- No token required.
+- SDKs: centrifuge-js, centrifuge-python, centrifuge-java, centrifuge-go, centrifuge-swift, centrifuge-dart, centrifuge-csharp.
+- Keep-alive: Server sends ping messages, client must respond with pong within 25 seconds.
+- Multiple channels: Subscribe to multiple channels using a single client.
+- Order book stream:
+  - Channel pattern: public:orderbook-* (e.g., public:orderbook-BTCIRT).
+  - Use { delta: 'fossil' } for bandwidth optimization (requires Fossil algorithm implementation if not using official SDKs).
+
+Address Book and Whitelist Mode
+1. Address Book List
+   - GET /address_book
+   - Rate Limit: 20 requests/minute
+   - Retrieves the user's address book.
+   - Parameters:
+     - network (string, optional): Filter by network.
+
+2. Add Address
+   - POST /address_book
+   - Rate Limit: 6 requests/minute
+   - Adds a new address to the address book.
+   - Parameters:
+     - title (string, required): Address title.
+     - network (string, required): Network.
+     - address (string, required): Address.
+     - tag (string, required for tag-mandatory networks): Tag.
+     - otpCode (string, required): Email and SMS verification code.
+     - tfaCode (string, required): Two-factor authentication code.
+
+3. Delete Address
+   - DELETE /address_book/<address_id>/delete
+   - Rate Limit: 6 requests/minute
+   - Deletes an address from the address book.
+
+4. Activate Whitelist Mode
+   - POST /address_book/whitelist/activate
+   - Rate Limit: 6 requests/minute
+   - Activates whitelist mode, restricting withdrawals to addresses in the address book.
+
+5. Deactivate Whitelist Mode
+   - POST /address_book/whitelist/deactivate
+   - Rate Limit: 6 requests/minute
+   - Deactivates whitelist mode.
+   - Parameters:
+     - otpCode (string, required): Email and SMS verification code.
+     - tfaCode (string, required): Two-factor authentication code.
+
+Security
+1. Login History
+   - GET /users/login-attempts
+   - Retrieves the user's login history.
+
+2. Emergency Cancel Activation
+   - GET /security/emergency-cancel/activate
+   - Activates emergency cancellation of withdrawal requests.
+
+3. Anti-Phishing Code
+   - POST /security/anti-phishing: Creates an anti-phishing code.
+   - Parameters:
+        - code (string, required): Anti-phishing code.
+        - otpCode (number, required): OTP code.
+   - GET /security/anti-phishing: Retrieves the anti-phishing code.
+
+Referral Program
+1. Referral Links List
+   - GET /users/referral/links-list
+   - Rate Limit: 50 requests/10 minutes
+   - Retrieves a list of the user's referral codes.
+
+2. Add Referral Link
+   - POST /users/referral/links-add
+   - Rate Limit: 5 requests/minute
+   - Creates a new referral code.
+   - Parameters:
+     - friendShare (int, optional): Referral commission share for the invited friend (default: 0).
+
+3. Referral Status
+   - GET /users/referral/referral-status
+   - Rate Limit: 50 requests/10 minutes
+   - Checks if the user was referred by another user.
+
+4. Set Referrer
+   - POST /users/referral/set-referrer
+   - Rate Limit: 50 requests/10 minutes
+   - Sets the referrer for the user (within 24 hours of registration).
+   - Parameters:
+     - referrerCode (string, required): Referrer's referral code.
+
+Authentication
+1. Login - Get Token
+   - POST /auth/login/
+   - Rate Limit: 30 requests/10 minutes
+   - Retrieves an authentication token.
+   - Parameters:
+     - username (string, required): User's email.
+     - password (string, required): User's password.
+     - remember (string, optional): 'yes' for a long-term token (30 days), 'no' for a short-term token (4 hours).
+     - captcha (string, required): CAPTCHA (use 'api' for requests from Iranian IPs).
+     - X-TOTP (header, required if 2FA is enabled): TOTP code.
+
+2. Logout - Invalidate Token
+   - POST /auth/logout/
+   - Invalidates the current authentication token.
+
+Profit and Loss
+1. Last Week Daily Profit
+   - POST /users/portfolio/last-week-daily-profit
+   - Rate Limit: 10 requests/3 minutes
+   - Retrieves daily profit/loss data for the last week.
+
+2. Last Week Daily Total Profit
+   - POST /users/portfolio/last-week-daily-total-profit
+   - Rate Limit: 10 requests/3 minutes
+   - Retrieves total profit/loss data for the last week, aggregated daily.
+
+3. Last Month Total Profit
+   - POST /users/portfolio/last-month-total-profit
+   - Rate Limit: 10 requests/3 minutes
+   - Retrieves total profit/loss data for the last month.
+
+Other
+1. System Options
+   - GET /v2/options
+   - Retrieves system settings, including active cryptocurrencies, minimum order amounts, fee tiers, withdrawal limits, and other useful information.
+   - No parameters.
+
+Important Notes
+- Error Codes: Refer to the "Error Codes" section in the documentation for each API endpoint to understand specific error messages.
+- Monetary Values: Send monetary values as strings to maintain precision.
+- Pagination: Use the page and pageSize parameters for paginated results.
+- Time Filter: Use the from and to parameters for filtering by date.
+- Shared Rate Limit: Be mindful of the shared rate limit for order placement APIs.
+- Pro Mode: Use the pro=yes parameter to bypass certain restrictions if you understand the implications.
+- Test Environment: Utilize the Nobitex test environment (https://testnet.nobitex.ir, API: https://testnetapi.nobitex.ir) for development and testing.
+- Unix Time: Understand the Unix time format used for timestamps.
+- Postman Collection: Use the provided Postman collection for code samples in various programming languages.
+- API Documentation: Always refer to the official Nobitex API documentation for the most up-to-date information.
+</nobitex_doc_cheatsheet>
+
+<task>
+Your task is to:
+1. Define the two custom exchanges as subclasses of CCXT's `BaseExchange` or relevant classes.
+2. Implement the necessary methods and attributes for these exchanges, such as:
+   - Symbol unification.
+   - Fetching market data, order book, and trades.
+   - Placing and managing orders.
+   - Error handling and retry mechanisms.
+3. Ensure all code adheres to CCXT's documentation, conventions, and best practices.
+</task>
+
+<requirements>
+1. Your solution **must** be based on CCXT's official documentation and expert practices.
+2. Carefully analyze the provided codebase to ensure your additions are compatible and cohesive.
+3. The implementation **must** be error-free and production-ready, covering:
+   - Proper input validation.
+   - Handling edge cases.
+   - Comprehensive coverage of required features.
+4. Clearly explain your thought process for each part of the implementation.
+5. Include comments in the code for clarity and maintainability.
+</requirements>
+
+<note>
+Think deeply about the design and implementation. Ensure robustness, correctness, and compatibility. 
+Focus on delivering a high-quality solution that integrates seamlessly with the provided codebase.
+</note>
+
+</prompt>
 

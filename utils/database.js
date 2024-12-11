@@ -45,6 +45,7 @@ db.serialize(() => {
         entrySellPrice REAL NOT NULL,
         closeBuyPrice REAL NOT NULL,
         closeSellPrice REAL NOT NULL,
+        USDTPrice REAL NOT NULL,
         timestamp INTEGER NOT NULL,
         closeTimestamp INTEGER NOT NULL
       )`,
@@ -103,8 +104,8 @@ function moveToClosedPositions(positionId, closingDetails) {
         const closeTimestamp = Date.now();
         db.run(
           `INSERT INTO closed_positions 
-            (symbol, buyExchange, sellExchange, amount, entryBuyPrice, entrySellPrice, closeBuyPrice, closeSellPrice, timestamp, closeTimestamp)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            (symbol, buyExchange, sellExchange, amount, entryBuyPrice, entrySellPrice, closeBuyPrice, closeSellPrice, USDTPrice, timestamp, closeTimestamp)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             position.symbol,
             position.buyExchange,
@@ -114,6 +115,7 @@ function moveToClosedPositions(positionId, closingDetails) {
             position.entrySellPrice,
             closingDetails.closeBuyPrice,
             closingDetails.closeSellPrice,
+            position.USDTPrice,
             position.timestamp,
             closeTimestamp,
           ],
@@ -162,10 +164,11 @@ function storePosition(position) {
       amount,
       entryBuyPrice,
       entrySellPrice,
+      USDTPrice,
     } = position;
     const timestamp = Date.now();
     db.run(
-      `INSERT INTO positions (symbol, buyExchange, sellExchange, amount, entryBuyPrice, entrySellPrice, timestamp)
+      `INSERT INTO positions (symbol, buyExchange, sellExchange, amount, entryBuyPrice, entrySellPrice, USDTPrice, timestamp)
          VALUES (?, ?, ?, ?, ?, ?, ?)`,
       [
         symbol,
@@ -174,6 +177,7 @@ function storePosition(position) {
         amount,
         entryBuyPrice,
         entrySellPrice,
+        USDTPrice,
         timestamp,
       ],
       function (err) {

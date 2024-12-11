@@ -4,11 +4,14 @@ import {
   standardizeWallexOrderBooks,
 } from '../transforms/standardizations.js';
 import { splitSymbolsIntoQuoteAndBase } from '../utils/splitSymbols.js';
+import { CONFIG } from '../config.js';
 
 // Fetch Nobitex L2 Order Books
 export async function fetchNobitexOrderBooks(symbols) {
   try {
-    const response = await axios.get('https://api.nobitex.ir/v3/orderbook/all');
+    const response = await axios.get(
+      'https://testnetapi.nobitex.ir/v3/orderbook/all',
+    );
     const data = response.data;
 
     if (!data) {
@@ -57,27 +60,27 @@ export async function fetchOrderBooks(exchanges, exchangeId, symbols) {
       const wallexOrderBooks = await fetchWallexOrderBooks(symbols);
       Object.assign(orderBooks, wallexOrderBooks);
     } else {
-      // For CCXT exchanges
-      if (exchanges[exchangeId].has.fetchOrderBooks) {
-        const exchangeOrderBooks = await exchanges[exchangeId].fetchOrderBooks(
-          symbols,
-        );
-        Object.assign(orderBooks, exchangeOrderBooks);
-      } else {
-        const orderBooksPromises = symbols
-          .filter(symbol => !quotesMap.TMN.includes(symbol))
-          .map(async symbol => {
-            try {
-              const orderBook = await exchanges[exchangeId].fetchOrderBook(
-                symbol,
-              );
-              orderBooks[symbol] = orderBook;
-            } catch (err) {
-              console.error(`Error fetching order book for ${symbol}:`, err);
+      const orderBooksPromises = symbols
+        .filter(symbol => !quotesMap.TMN.includes(symbol))
+        .map(async symbol => {
+          try {
+            const [base, quote] = symbol.split('/');
+            let convertedSymbol = symbol;
+            if (
+              CONFIG.exchangeParams[exchangeId]?.options?.defaultType ===
+              'future'
+            ) {
+              convertedSymbol = `${base}/${quote}:${quote}`;
             }
-          });
-        await Promise.allSettled(orderBooksPromises);
-      }
+            const orderBook = await exchanges[exchangeId].fetchOrderBook(
+              convertedSymbol,
+            );
+            orderBooks[symbol] = orderBook;
+          } catch (err) {
+            console.error(`Error fetching order book for ${symbol}:`, err);
+          }
+        });
+      await Promise.allSettled(orderBooksPromises);
 
       console.log(
         `${exchangeId.charAt(0).toUpperCase()}${exchangeId.slice(

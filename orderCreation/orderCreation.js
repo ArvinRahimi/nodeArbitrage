@@ -16,8 +16,6 @@ export async function createOrder(
     selectedBuyPrice,
     selectedSellPrice,
     tradeVolumeUSDT,
-    netBuyPrice,
-    netSellPrice,
     USDTPrice,
   } = order;
 
@@ -26,22 +24,27 @@ export async function createOrder(
 
   const priceDecimals = Math.floor(Math.log10(pricePrecision));
 
-  const USDTAmount = tradeVolumeUSDT / ((netBuyPrice + netSellPrice) / 2);
+  const USDTAmount = symbol.endsWith('/USDT')
+    ? tradeVolumeUSDT / ((selectedBuyPrice + selectedSellPrice) / 2)
+    : (tradeVolumeUSDT * USDTPrice) /
+      ((selectedBuyPrice + selectedSellPrice) / 2);
   const roundedUSDTAmount =
-    Math.floor(USDTAmount / amountPrecision) * minAmount;
-  const amountToTrade = {
-    USDT: roundedUSDTAmount,
-    TMN: roundedUSDTAmount * USDTPrice,
-  };
+    Math.floor(USDTAmount / amountPrecision) * amountPrecision;
+
+  const amountToTrade = roundedUSDTAmount;
 
   console.log(
-    `Placing orders: Buy ${amountToTrade[symbol.split('/')[0]].toFixed(
+    `Placing orders: Buy ${amountToTrade.toFixed(
       6,
     )} ${symbol} on ${buyExchange}, Sell on ${sellExchange}`,
   );
 
   let buyOrder, sellOrder;
 
+  if (amountToTrade === 0) {
+    console.log('WARNING: "amountToTrade" is zero, skipping order creation');
+    return;
+  }
   const [buyResult, sellResult] = await Promise.allSettled([
     createExchangeOrder(
       buyExchange,
@@ -84,9 +87,10 @@ export async function createOrder(
       symbol,
       buyExchange,
       sellExchange,
-      amount: amountToTrade[symbol.split('/')[1]],
-      entryBuyPrice: buyOrder.average,
-      entrySellPrice: sellOrder.average,
+      amount: amountToTrade,
+      entryBuyPrice: buyOrder?.average || selectedBuyPrice,
+      entrySellPrice: sellOrder?.average || selectedSellPrice,
+      USDTPrice,
     });
   }
 }

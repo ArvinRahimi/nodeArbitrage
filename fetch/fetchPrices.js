@@ -6,7 +6,9 @@ import { CONFIG } from '../config.js';
 export async function fetchNobitexPrices() {
   const { coinsToConsider, coinsToIgnore } = CONFIG;
   try {
-    const response = await axios.get('https://api.nobitex.ir/v3/orderbook/all');
+    const response = await axios.get(
+      'https://testnetapi.nobitex.ir/v3/orderbook/all',
+    );
     const data = response.data;
     delete data.status;
     const prices = {};
@@ -111,7 +113,7 @@ export async function fetchPrices(exchanges, exchangeId) {
   const { coinsToConsider, coinsToIgnore } = CONFIG;
   try {
     const exchange = exchanges[exchangeId];
-    await exchange.loadMarkets();
+    // await exchange.loadMarkets();
     const tickers = await exchange.fetchTickers();
     const prices = {};
 
@@ -128,7 +130,7 @@ export async function fetchPrices(exchanges, exchangeId) {
 
       //! make sure to check the ticker of each exchange, because
       //! sometimes bid and ask are not available.
-      prices[symbol] = {
+      prices[base + '/' + quote.split(':USDT')[0]] = {
         bid: ticker.bid || ticker.close,
         ask: ticker.ask || ticker.close,
       };

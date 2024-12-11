@@ -4,7 +4,9 @@ import { standardizeSpecialCoinPrecisions } from '../transforms/standardizations
 // precisions example: 0.0000001
 async function getNobitexPrecisions() {
   try {
-    const response = await axios.get('https://api.nobitex.ir/v2/options');
+    const response = await axios.get(
+      'https://testnetapi.nobitex.ir/v2/options',
+    );
     const { amountPrecisions, pricePrecisions } = response.data.nobitex;
     const nobitexPricePrecisions = {};
     const nobitexAmountPrecisions = {};
@@ -51,8 +53,9 @@ async function getWallexPrecisions() {
 
       const standardizedSymbol = base + '/' + quote;
       wallexAmountPrecisions[standardizedSymbol] = precision.minQty;
-      wallexPricePrecisions[standardizedSymbol] =
-        10 ** -precision.quoteAssetPrecision;
+      wallexPricePrecisions[standardizedSymbol] = precision?.quotePrecision
+        ? 10 ** -precision.quotePrecision
+        : 10 ** -precision?.quoteAssetPrecision;
     }
     const wallexPrecisions = {
       amountPrecisions: wallexAmountPrecisions,
@@ -76,8 +79,8 @@ export function findLargestPriceAndAmounPrecisions(symbol) {
     wallexPrecisions.amountPrecisions[symbol],
   ];
 
-  const amountPrecision = Math.max(...pricePrecisions);
-  const pricePrecision = Math.max(...amountPrecisions);
+  const amountPrecision = Math.max(...amountPrecisions);
+  const pricePrecision = Math.max(...pricePrecisions);
   const precision = { amountPrecision, pricePrecision };
 
   return precision;

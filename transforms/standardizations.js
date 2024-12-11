@@ -75,6 +75,8 @@ export function standardizeSpecialCoinOrderBooks(exchangeId, orderBooks) {
     const { originalBase, standardBase, correctionFactor } =
       standardizations[i];
 
+    if (!basesMap[originalBase]) return;
+
     for (const originalSymbol of basesMap[originalBase]) {
       if (!orderBooks[originalSymbol]) continue;
       const { bids, asks } = orderBooks[originalSymbol];
@@ -91,8 +93,9 @@ export function standardizeSpecialCoinOrderBooks(exchangeId, orderBooks) {
 }
 
 export function standardizeSpecialCoinPrices(allPrices) {
-  const { specialCoinStandardizations } = CONFIG;
+  const { specialCoinStandardizations, exchangesToUse } = CONFIG;
   for (const exchangeId in specialCoinStandardizations) {
+    if (!exchangesToUse.includes(exchangeId)) continue;
     const standardizations = specialCoinStandardizations[exchangeId];
 
     const symbols = Object.keys(allPrices[exchangeId]);
@@ -103,7 +106,9 @@ export function standardizeSpecialCoinPrices(allPrices) {
         standardizations[i];
       if (allPrices[exchangeId] && basesMap[originalBase]) {
         const priceData = allPrices[exchangeId];
-
+        if (!priceData[originalBase]) {
+          continue;
+        }
         for (const originalSymbol of basesMap[originalBase]) {
           const { bid, ask } = priceData[originalSymbol];
           const standardSymbol = originalSymbol.replace(
@@ -138,6 +143,9 @@ export function standardizeSpecialCoinPrecisions(exchangeId, precisions) {
       standardizations[i];
 
     for (const originalSymbol of basesMap[originalBase]) {
+      if (!precisions.pricePrecisions[originalSymbol]) {
+        continue;
+      }
       const pricePrecision = precisions.pricePrecisions[originalSymbol];
       const standardSymbol = originalSymbol.replace(originalBase, standardBase);
       precisions.pricePrecisions[standardSymbol] = pricePrecision;
@@ -146,6 +154,9 @@ export function standardizeSpecialCoinPrecisions(exchangeId, precisions) {
     }
 
     for (const originalSymbol of basesMap[originalBase]) {
+      if (!precisions.pricePrecisions[originalSymbol]) {
+        continue;
+      }
       const amountPrecision = precisions.amountPrecisions[originalSymbol];
       const standardSymbol = originalSymbol.replace(originalBase, standardBase);
       precisions.amountPrecisions[standardSymbol] =

@@ -1,3 +1,4 @@
+import 'dotenv/config';
 // Configuration
 export const CONFIG = {
   testMode: true,

@@ -39,14 +39,20 @@ export async function createExchangeOrder(
       if (symbol.endsWith('/TMN')) {
         convertedValues = convertTMNOrderToUSDT(symbol, price, USDTPrice);
       }
-      const convertedSymbol = convertedValues?.convertedSymbol || symbol;
+      let convertedSymbol = convertedValues?.convertedSymbol || symbol;
       const convertedPrice = convertedValues?.convertedPrice || price;
-
+      if (
+        !symbol.endsWith('/TMN') &&
+        CONFIG.exchangeParams[exchangeId]?.options?.defaultType === 'future'
+      ) {
+        const [base, quote] = convertedSymbol.split('/');
+        convertedSymbol = `${base}/${quote}:${quote}`;
+      }
       return exchanges[exchangeId].createOrder(
         convertedSymbol,
         type,
         side,
-        amount.USDT,
+        amount,
         convertedPrice,
       );
   }
@@ -70,9 +76,10 @@ async function createNobitexOrder(
     transformedBase: nobitexBase,
     transformedAmount: nobitexAmount,
     transformedPrice: nobitexPrice,
-  } = originalizeSpecialCoinOrder('nobitex', base, amount[quote], price);
+  } = originalizeSpecialCoinOrder('nobitex', base, amount, price);
 
-  const url = 'https://api.nobitex.ir/market/orders/add';
+  const url = 'https://testnetapi.nobitex.ir/market/orders/add';
+  console.log(apiKey);
   const headers = {
     Authorization: `Token ${apiKey}`,
     'Content-Type': 'application/json',
@@ -129,7 +136,7 @@ async function createWallexOrder(
     transformedBase: wallexBase,
     transformedAmount: wallexAmount,
     transformedPrice: wallexPrice,
-  } = originalizeSpecialCoinOrder('wallex', base, amount[quote], price);
+  } = originalizeSpecialCoinOrder('wallex', base, amount, price);
 
   // Wallex expects the symbol in a specific format (e.g., 'BTCUSDT')
   const wallexSymbol = wallexBase + quote;
